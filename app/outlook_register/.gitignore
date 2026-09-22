@@ -1,0 +1,6 @@
+config.json
+proxy_pool.json
+Results/
+log/
+browser_profiles/
+web_dist/

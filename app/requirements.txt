@@ -10,3 +10,6 @@ PySocks==1.7.1
 python-dotenv==1.2.2
 requests==2.34.2
 uvicorn[standard]==0.52.1
+faker
+nest_asyncio
+patchright

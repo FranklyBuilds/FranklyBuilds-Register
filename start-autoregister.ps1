@@ -8,6 +8,7 @@ $ErrorActionPreference = 'Stop'
 
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $App = Join-Path $Root 'app'
+$OutlookRoot = Join-Path $App 'outlook_register'
 $Python = Join-Path $Root 'register_env\Scripts\python.exe'
 $settingsPath = Join-Path $Root 'data\settings.json'
 $RuntimeLogs = Join-Path $Root 'data\runtime'
@@ -241,6 +242,32 @@ Start-Component 'Backend' {
     }
 }
 
+Start-Component 'Outlook Register' {
+    if (-not (Test-Path -LiteralPath (Join-Path $OutlookRoot 'server.py'))) {
+        Write-Host '  bundled OutlookRegister backend not found; Outlook page will remain unavailable' -ForegroundColor Yellow
+    } elseif (Test-LocalPort 8001) {
+        Write-Host '  already running on 127.0.0.1:8001' -ForegroundColor Green
+    } else {
+        $previousHost = $env:OUTLOOK_REGISTER_HOST
+        $previousPort = $env:OUTLOOK_REGISTER_PORT
+        $previousToken = $env:OUTLOOK_REGISTER_ADMIN_TOKEN
+        $env:OUTLOOK_REGISTER_HOST = '127.0.0.1'
+        $env:OUTLOOK_REGISTER_PORT = '8001'
+        $env:OUTLOOK_REGISTER_ADMIN_TOKEN = Get-AppEnvValue 'OUTLOOK_REGISTER_ADMIN_TOKEN'
+        try {
+            $process = Start-Process -FilePath $Python -ArgumentList 'server.py' -WorkingDirectory $OutlookRoot -WindowStyle Hidden -PassThru `
+                -RedirectStandardOutput (Join-Path $RuntimeLogs 'outlook-register.out.log') `
+                -RedirectStandardError (Join-Path $RuntimeLogs 'outlook-register.err.log')
+        } finally {
+            $env:OUTLOOK_REGISTER_HOST = $previousHost
+            $env:OUTLOOK_REGISTER_PORT = $previousPort
+            $env:OUTLOOK_REGISTER_ADMIN_TOKEN = $previousToken
+        }
+        Confirm-Started 'Outlook Register' $process 8001 (Join-Path $RuntimeLogs 'outlook-register.err.log') 30
+        Save-ProcessId 'outlook-register' $process
+    }
+}
+
 Start-Component 'Frontend' {
     if (Test-LocalPort 5173) {
         Write-Host '  already running' -ForegroundColor Green
@@ -271,6 +298,7 @@ Write-Host ''
 Write-Host 'FranklyBuilds-Register (FB注册机) started:' -ForegroundColor Green
 Write-Host '  Page: http://127.0.0.1:5173/launch'
 Write-Host '  Backend: http://127.0.0.1:8000'
+Write-Host '  Outlook Register API: http://127.0.0.1:8001'
 Write-Host '  Roxy API: http://127.0.0.1:50000 (enable it in Roxy first)'
 Write-Host '  Embedded browser proxy bridge: starts per profile on a temporary loopback port'
 Write-Host '  Legacy local mixed proxy 7890: optional; only used when that compatibility group is selected'
