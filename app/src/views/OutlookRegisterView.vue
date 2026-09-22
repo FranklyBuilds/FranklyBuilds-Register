@@ -10,6 +10,7 @@ const connected = ref(false)
 const loading = ref(false)
 const saving = ref(false)
 const state = ref<OutlookRegisterState | null>(null)
+const scopesText = ref('')
 let timer: ReturnType<typeof setInterval> | undefined
 
 const form = reactive({
@@ -17,9 +18,16 @@ const form = reactive({
   concurrent_flows: 1, tasks: 1, success_tasks: null as number | null,
   batch_success_limit: 300, bot_protection_wait: 15, max_captcha_retries: 3,
   proxy: { mode: 'single' as 'single' | 'multiple', type: 'http' as 'http' | 'https' | 'socks5' | 'socks5h', host: '', single_port: 0, port_start: 0, port_end: 0, max_per_proxy: 20 },
+  oauth2: { enable_oauth2: true, client_id: '', redirect_url: 'https://localhost', Scopes: [] as string[] },
+  temp_mail: { enabled: false, base_url: '', admin_password: '', domain: '', name_prefix: '', enable_prefix: false, code_timeout: 120, poll_interval: 3 },
 })
 
-const running = computed(() => Boolean(state.value?.running || state.value?.status === 'running'))
+const running = computed(() => Boolean(
+  state.value?.running
+  || state.value?.enabled
+  || state.value?.status === 'running'
+  || state.value?.stats?.status === 'running',
+))
 const statsText = computed(() => {
   const stats = state.value?.stats || {}
   return `提交 ${stats.submitted ?? 0} · 成功 ${stats.succeeded ?? 0} · 失败 ${stats.failed ?? 0}`
@@ -27,11 +35,16 @@ const statsText = computed(() => {
 
 function applyState(next: OutlookRegisterState) {
   state.value = next
-  const source: any = next
+  const source: any = next.config || next
   for (const key of ['email_suffix', 'headless', 'captcha_strategy', 'concurrent_flows', 'tasks', 'success_tasks', 'batch_success_limit', 'bot_protection_wait', 'max_captcha_retries']) {
     if (source[key] !== undefined) (form as any)[key] = source[key]
   }
   if (source.proxy) Object.assign(form.proxy, source.proxy)
+  if (source.oauth2) {
+    Object.assign(form.oauth2, source.oauth2)
+    scopesText.value = Array.isArray(source.oauth2.Scopes) ? source.oauth2.Scopes.join('\n') : ''
+  }
+  if (source.temp_mail) Object.assign(form.temp_mail, source.temp_mail)
 }
 
 async function connect() {
@@ -56,7 +69,9 @@ async function refresh() {
 async function save() {
   saving.value = true
   try {
-    applyState(await outlookGateway.saveRegister(JSON.parse(JSON.stringify(form))))
+    const payload: any = JSON.parse(JSON.stringify(form))
+    payload.oauth2.Scopes = scopesText.value.split(/[\s,]+/).map((item) => item.trim()).filter(Boolean)
+    applyState(await outlookGateway.saveRegister(payload))
     ElMessage.success('Outlook 注册配置已保存')
   } catch (error) { ElMessage.error(error instanceof Error ? error.message : '保存失败') }
   finally { saving.value = false }
@@ -103,7 +118,25 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
           <el-col v-if="form.proxy.mode === 'single'" :span="7"><el-form-item label="端口"><el-input-number v-model="form.proxy.single_port" :min="0" :max="65535" /></el-form-item></el-col>
           <template v-else><el-col :span="3"><el-form-item label="起始端口"><el-input-number v-model="form.proxy.port_start" :min="0" :max="65535" /></el-form-item></el-col><el-col :span="4"><el-form-item label="结束端口"><el-input-number v-model="form.proxy.port_end" :min="0" :max="65535" /></el-form-item></el-col></template>
         </el-row>
-        <el-row :gutter="16"><el-col :span="6"><el-form-item label="无头模式"><el-switch v-model="form.headless" /></el-form-item></el-col><el-col :span="8"><el-form-item label="状态"><el-tag :type="running ? 'warning' : 'info'">{{ state?.status || 'idle' }} · {{ statsText }}</el-tag></el-form-item></el-col></el-row>
+        <el-row :gutter="16"><el-col :span="6"><el-form-item label="每端口最大使用次数"><el-input-number v-model="form.proxy.max_per_proxy" :min="1" /></el-form-item></el-col><el-col :span="6"><el-form-item label="无头模式"><el-switch v-model="form.headless" /></el-form-item></el-col><el-col :span="8"><el-form-item label="状态"><el-tag :type="running ? 'warning' : 'info'">{{ state?.status || state?.stats?.status || 'idle' }} · {{ statsText }}</el-tag></el-form-item></el-col></el-row>
+        <el-divider content-position="left">OAuth2</el-divider>
+        <el-row :gutter="16">
+          <el-col :span="6"><el-form-item label="获取 refresh_token"><el-switch v-model="form.oauth2.enable_oauth2" /></el-form-item></el-col>
+          <el-col :span="9"><el-form-item label="client_id"><el-input v-model="form.oauth2.client_id" /></el-form-item></el-col>
+          <el-col :span="9"><el-form-item label="redirect_url"><el-input v-model="form.oauth2.redirect_url" /></el-form-item></el-col>
+          <el-col :span="24"><el-form-item label="Scopes（空格或换行分隔）"><el-input v-model="scopesText" type="textarea" :rows="2" /></el-form-item></el-col>
+        </el-row>
+        <el-divider content-position="left">辅助邮箱绑定</el-divider>
+        <el-row :gutter="16">
+          <el-col :span="6"><el-form-item label="启用临时邮箱"><el-switch v-model="form.temp_mail.enabled" /></el-form-item></el-col>
+          <el-col :span="9"><el-form-item label="接口地址"><el-input v-model="form.temp_mail.base_url" /></el-form-item></el-col>
+          <el-col :span="9"><el-form-item label="管理员密码"><el-input v-model="form.temp_mail.admin_password" type="password" show-password /></el-form-item></el-col>
+          <el-col :span="6"><el-form-item label="邮箱域名"><el-input v-model="form.temp_mail.domain" /></el-form-item></el-col>
+          <el-col :span="6"><el-form-item label="邮箱名前缀"><el-input v-model="form.temp_mail.name_prefix" /></el-form-item></el-col>
+          <el-col :span="6"><el-form-item label="使用前缀"><el-switch v-model="form.temp_mail.enable_prefix" /></el-form-item></el-col>
+          <el-col :span="3"><el-form-item label="验证码超时"><el-input-number v-model="form.temp_mail.code_timeout" :min="10" /></el-form-item></el-col>
+          <el-col :span="3"><el-form-item label="轮询间隔"><el-input-number v-model="form.temp_mail.poll_interval" :min="1" /></el-form-item></el-col>
+        </el-row>
       </el-form>
     </el-card>
   </div>

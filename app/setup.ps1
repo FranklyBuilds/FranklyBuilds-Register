@@ -14,6 +14,12 @@ if (-not (Test-Path -LiteralPath $python)) {
 
 & $python -m pip install --upgrade pip
 & $python -m pip install -r requirements.txt -r requirements-dev.txt
+$patchright = Join-Path (Split-Path $python) 'patchright.exe'
+if (Test-Path -LiteralPath $patchright) {
+  & $patchright install chromium
+} else {
+  Write-Warning 'patchright executable not found; Outlook registration browser was not installed.'
+}
 & npm.cmd ci
 
 $mongoUriLine = Get-Content -LiteralPath $envFile |

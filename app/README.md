@@ -153,6 +153,7 @@ npm.cmd run dev
 - 前端真实任务与手动 `browser_probe` CLI 通过 MongoDB `browser_probe_controller` 租约互斥。
 - 成功邮箱从邮箱池物理删除；失败、取消和中断任务释放未完成邮箱。
 - 协议注册成功时先原子写入账号与 Access Token，再消费预留邮箱；缺失或已过期的 Access Token 会释放邮箱并记为失败。
+- Outlook 注册后端已随本项目内置在 `app/outlook_register/`，由根目录启动脚本自动监听 `127.0.0.1:8001`。控制台的“Outlook 注册”页面直接调用该服务，支持 Outlook/Hotmail 注册、验证码策略、代理池、OAuth2 refresh token、辅助邮箱绑定、任务日志和结果池；配置和结果分别保存在该目录下的 `config.json`、`Results/` 与 `log/`。
 - FastAPI 重启后，遗留活动任务标记为 `interrupted`，不会自动续跑。
 - 注册 worker 成功提取并保存 AT 后，会由同一 Playwright 页面跳转 `accounts/check/v4-2023-04-27` JSON 接口，按 JWT 内 `chatgpt_account_id` 选择账号并解析套餐、订阅与 Plus 试用资格，随后恢复 ChatGPT 主页。资格查询失败不会回滚已注册账号或 AT，只在账号记录中保存脱敏错误码。
 - 账号池支持单账号和选中账号优惠资格查询，统一调用 `POST /api/accounts/check-promotion`。后端使用 `curl_cffi`，每个查询从代理池独占一个 HTTP 代理租约，请求完成或异常后必定释放；单次最多 100 个账号，服务端并发最多 3 个且受可用代理数限制。

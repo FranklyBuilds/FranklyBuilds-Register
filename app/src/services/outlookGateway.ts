@@ -22,8 +22,13 @@ export interface OutlookRegisterConfig {
 }
 
 export interface OutlookRegisterState extends OutlookRegisterConfig {
+  enabled?: boolean
+  config?: OutlookRegisterConfig
   status?: string
   stats?: Record<string, unknown>
+  failure_stats?: Record<string, unknown>
+  result_count?: number
+  log_path?: string
   logs?: Array<{ ts?: string; level?: string; line?: string }>
   running?: boolean
 }
