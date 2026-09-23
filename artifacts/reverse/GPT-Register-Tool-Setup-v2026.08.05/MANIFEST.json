@@ -1,0 +1,1619 @@
+{
+  "schema": 1,
+  "source_path": "E:\\code\\FB-GPT-Register\\gpt\\artifacts\\reverse\\GPT-Register-Tool-Setup-v2026.08.05\\original\\GPT-Register-Tool-Setup-v2026.08.05.exe",
+  "archived_installer": "E:\\code\\FB-GPT-Register\\gpt\\artifacts\\reverse\\GPT-Register-Tool-Setup-v2026.08.05\\original\\GPT-Register-Tool-Setup-v2026.08.05.exe",
+  "installer": {
+    "size": 56296327,
+    "sha256": "5C83FED290B5EB19749775209F1BD150D96C2B920C00F53277D2C1FC27559590",
+    "md5": "4B08B663F9B6617A412DD1542A7708DF",
+    "pe_format": "PE32+ x64 .NET single-file bundle",
+    "embedded_zip_start": 10109440,
+    "embedded_zip_end": 14550135,
+    "embedded_zip_size": 4440695,
+    "embedded_zip_sha256": "4DA6D3456FE40DC753961EC9785171B363DEB96600D4F1D30DF14A3F88F22E9A",
+    "zip_entries": 231,
+    "zip_central_directory_offset": 4422649,
+    "zip_central_directory_size": 18024
+  },
+  "payload_zip": "E:\\code\\FB-GPT-Register\\gpt\\artifacts\\reverse\\GPT-Register-Tool-Setup-v2026.08.05\\original\\payload.zip",
+  "analysis_report": "E:\\code\\FB-GPT-Register\\gpt\\artifacts\\reverse\\GPT-Register-Tool-Setup-v2026.08.05\\PROTOCOL-PAYMENT-ANALYSIS.md",
+  "payload_directory": "E:\\code\\FB-GPT-Register\\gpt\\artifacts\\reverse\\GPT-Register-Tool-Setup-v2026.08.05\\payload",
+  "entries": [
+    {
+      "path": ".github/workflows/ci.yml",
+      "size": 662,
+      "compressed_size": 328,
+      "crc32": "721489F9",
+      "sha256": "3FC23FAE2105F334DAAC9F0AE4FBA77AD123F4AC515B422C8CD67842F1ACB383"
+    },
+    {
+      "path": "dist/net10/CommunityToolkit.Mvvm.dll",
+      "size": 146760,
+      "compressed_size": 80631,
+      "crc32": "F8A38AF0",
+      "sha256": "19B2144FED9600D58A742A5A4A5FD7B10D4D0D2C2E79F5D8019307CF5657044F"
+    },
+    {
+      "path": "dist/net10/Microsoft.Extensions.Configuration.Abstractions.dll",
+      "size": 28456,
+      "compressed_size": 15335,
+      "crc32": "2E0FD833",
+      "sha256": "685493E38ADB7E5D06BFCD93AA160FB8CE23AAE80DADD1FF489E8CD4CFC6CAFE"
+    },
+    {
+      "path": "dist/net10/Microsoft.Extensions.Configuration.Binder.dll",
+      "size": 43304,
+      "compressed_size": 21517,
+      "crc32": "0FE4015C",
+      "sha256": "A8023C962DE35B80AF4F76900F5F76721D60BCF8DEAF68F537FA4AA5A34DFF9C"
+    },
+    {
+      "path": "dist/net10/Microsoft.Extensions.Configuration.CommandLine.dll",
+      "size": 25384,
+      "compressed_size": 13981,
+      "crc32": "0642A267",
+      "sha256": "BE304AF31EB2E2DDEF73EC907951535387FE70C039103805DFAB27743D5623FF"
+    },
+    {
+      "path": "dist/net10/Microsoft.Extensions.Configuration.dll",
+      "size": 44880,
+      "compressed_size": 22786,
+      "crc32": "F073CD44",
+      "sha256": "82E24FB29CE626917E2061CB56BC45BBCD6DF949C8C8A2FFA8E0D58131A57E5F"
+    },
+    {
+      "path": "dist/net10/Microsoft.Extensions.Configuration.EnvironmentVariables.dll",
+      "size": 21840,
+      "compressed_size": 12145,
+      "crc32": "6CE5E5FF",
+      "sha256": "2B02BCCE661642E4F74965B1A9BE29E3EF9D97FCC6AC9E0A969D60497016EC67"
+    },
+    {
+      "path": "dist/net10/Microsoft.Extensions.Configuration.FileExtensions.dll",
+      "size": 28456,
+      "compressed_size": 15223,
+      "crc32": "F9181529",
+      "sha256": "66C81C68358AD8E0845E89A42B0B90162D4796E6D9CF60DE02A6828ED1285448"
+    },
+    {
+      "path": "dist/net10/Microsoft.Extensions.Configuration.Json.dll",
+      "size": 27944,
+      "compressed_size": 15082,
+      "crc32": "46C7D903",
+      "sha256": "BCE587D4FDA7A8D6BC3758F0670E5A6A7095BE283B43A838A0E0CA054BAD021C"
+    },
+    {
+      "path": "dist/net10/Microsoft.Extensions.Configuration.UserSecrets.dll",
+      "size": 26408,
+      "compressed_size": 14169,
+      "crc32": "765FE61F",
+      "sha256": "A011B1BD1B3A7A8430C101CEAC2FED0610AE94AF8EE6DEEF45091E0E17089E1D"
+    },
+    {
+      "path": "dist/net10/Microsoft.Extensions.DependencyInjection.Abstractions.dll",
+      "size": 65832,
+      "compressed_size": 28705,
+      "crc32": "E348BBA5",
+      "sha256": "592C33E4BC20E041D6125B79A4311293540F30332495429241C3D7C7286C8E16"
+    },
+    {
+      "path": "dist/net10/Microsoft.Extensions.DependencyInjection.dll",
+      "size": 95568,
+      "compressed_size": 43984,
+      "crc32": "11A654BB",
+      "sha256": "5AF15E4B692DFA774550B0D506E3411F4A84ED1A757FF617016B6BD060E7B1DC"
+    },
+    {
+      "path": "dist/net10/Microsoft.Extensions.Diagnostics.Abstractions.dll",
+      "size": 31016,
+      "compressed_size": 15857,
+      "crc32": "C49C8601",
+      "sha256": "7A60EFF59E2360136FB2696227C643FF6E3CDE298FA010E3202151AC79BF55DE"
+    },
+    {
+      "path": "dist/net10/Microsoft.Extensions.Diagnostics.dll",
+      "size": 36176,
+      "compressed_size": 19418,
+      "crc32": "5373BB05",
+      "sha256": "71E08BA824B5A9E6A186D887B29890DDCADCBE2B2024FFFF0432F81821C72A66"
+    },
+    {
+      "path": "dist/net10/Microsoft.Extensions.FileProviders.Abstractions.dll",
+      "size": 23336,
+      "compressed_size": 12840,
+      "crc32": "9AD4AE63",
+      "sha256": "670E6CCB7984ADE31318AF5DB4FBA19903174721D8E9F1FD3D5E64403AC05D87"
+    },
+    {
+      "path": "dist/net10/Microsoft.Extensions.FileProviders.Physical.dll",
+      "size": 45392,
+      "compressed_size": 23668,
+      "crc32": "DBD274B7",
+      "sha256": "441746BDDB3B418462A2EDCCDD1386A7740A70E4E2767B2EF603A7CD721E6668"
+    },
+    {
+      "path": "dist/net10/Microsoft.Extensions.FileSystemGlobbing.dll",
+      "size": 47912,
+      "compressed_size": 24160,
+      "crc32": "64902038",
+      "sha256": "FE9F4D6F98E15E7F2F2AD8DB324B1AD5A7A2744D4BB3A5EAEB19F4A354BDAE5C"
+    },
+    {
+      "path": "dist/net10/Microsoft.Extensions.Hosting.Abstractions.dll",
+      "size": 54056,
+      "compressed_size": 23014,
+      "crc32": "0DEFFF81",
+      "sha256": "55D316F9A8DA2B2E91C50C75A92C44114EB23E4B796090008CFA4524FA082866"
+    },
+    {
+      "path": "dist/net10/Microsoft.Extensions.Hosting.dll",
+      "size": 71976,
+      "compressed_size": 33030,
+      "crc32": "7B06626F",
+      "sha256": "3DD19C2E520CAE17A612551CF8C52620E8AA4AD609CAE398AE1AFE04A4EF4A36"
+    },
+    {
+      "path": "dist/net10/Microsoft.Extensions.Logging.Abstractions.dll",
+      "size": 66896,
+      "compressed_size": 31640,
+      "crc32": "2DC7F6CC",
+      "sha256": "46826FD3B68BD23028B274FF73ECC161088B53E41B4A7436E759DE4D78143A43"
+    },
+    {
+      "path": "dist/net10/Microsoft.Extensions.Logging.Configuration.dll",
+      "size": 28456,
+      "compressed_size": 15473,
+      "crc32": "4A38D0A1",
+      "sha256": "2FFD6A6790FF271ECF5238ED7BCF583C9CC2C97B908B2F35CE33948CE7B616B0"
+    },
+    {
+      "path": "dist/net10/Microsoft.Extensions.Logging.Console.dll",
+      "size": 76112,
+      "compressed_size": 36799,
+      "crc32": "80A5AED8",
+      "sha256": "9468DC0466F2E582E2DE1C4FBDF3DBBFCB392E6A26CC9A5ECC65EA4AB66807C5"
+    },
+    {
+      "path": "dist/net10/Microsoft.Extensions.Logging.Debug.dll",
+      "size": 19792,
+      "compressed_size": 11319,
+      "crc32": "129CAE33",
+      "sha256": "A99B3C4B57C9B6F045F82A5F7BE3E83945F2D939A795B7C57BEFC10F1B61F00C"
+    },
+    {
+      "path": "dist/net10/Microsoft.Extensions.Logging.dll",
+      "size": 51496,
+      "compressed_size": 25717,
+      "crc32": "24951953",
+      "sha256": "14129C595B456EBFE99D0F04618247235043107B2159A772299EAD894B5223AC"
+    },
+    {
+      "path": "dist/net10/Microsoft.Extensions.Logging.EventLog.dll",
+      "size": 24912,
+      "compressed_size": 14267,
+      "crc32": "50975127",
+      "sha256": "3724057B31F8BF455360BDF21A26D7A3AE45FA9BF51CCC0A2363EB977688FC91"
+    },
+    {
+      "path": "dist/net10/Microsoft.Extensions.Logging.EventSource.dll",
+      "size": 34600,
+      "compressed_size": 17695,
+      "crc32": "3A505143",
+      "sha256": "7B6E0DE3E0FD1EF63794405409912973CC6611148BC3A822AB80300B88BC718D"
+    },
+    {
+      "path": "dist/net10/Microsoft.Extensions.Options.ConfigurationExtensions.dll",
+      "size": 21840,
+      "compressed_size": 12318,
+      "crc32": "718CC8C1",
+      "sha256": "57016B035BA45EDD1E18A35D0A15F33A8EDD06F514E81BB2578CFED1279138F6"
+    },
+    {
+      "path": "dist/net10/Microsoft.Extensions.Options.dll",
+      "size": 65320,
+      "compressed_size": 30629,
+      "crc32": "070790AD",
+      "sha256": "E6E4183C67C8B265D852E40E6B873640371C4EB19F6268D4C4734C1AEBA17DFB"
+    },
+    {
+      "path": "dist/net10/Microsoft.Extensions.Primitives.dll",
+      "size": 44840,
+      "compressed_size": 22558,
+      "crc32": "B6F0A950",
+      "sha256": "149F0BB5FBBF39836F38F61EA24EEE49D78BC62C63BDB3C462381BDFFB1D3603"
+    },
+    {
+      "path": "dist/net10/Serilog.dll",
+      "size": 163840,
+      "compressed_size": 68441,
+      "crc32": "CE797818",
+      "sha256": "3EE17790B1BF00EABCA2176288DE6C058977BC5B07E6D9839CF6A88433D72311"
+    },
+    {
+      "path": "dist/net10/Serilog.Extensions.Hosting.dll",
+      "size": 35840,
+      "compressed_size": 13901,
+      "crc32": "98A33525",
+      "sha256": "3E6D0284179EE0E1C197568FD79B58F869D15298FFF8ECB8447322FE87D44F47"
+    },
+    {
+      "path": "dist/net10/Serilog.Extensions.Logging.dll",
+      "size": 28672,
+      "compressed_size": 13703,
+      "crc32": "A6E06F63",
+      "sha256": "80D3EDBE3E3AC0B4C5BC764474220E7DA11DF8D285E0098F3DC1B65A734C8507"
+    },
+    {
+      "path": "dist/net10/Serilog.Sinks.Async.dll",
+      "size": 14848,
+      "compressed_size": 6303,
+      "crc32": "F91AD1F3",
+      "sha256": "1031CD50EE3F0D62BBFDAD3E07DE0E953F26B90EDAC475E1B06FC65D2B42619C"
+    },
+    {
+      "path": "dist/net10/Serilog.Sinks.File.dll",
+      "size": 36864,
+      "compressed_size": 16475,
+      "crc32": "5CFBF8F9",
+      "sha256": "4F4282671C2AC68284B4DC99F7A76EAC9CBD4E659978CEF642CFF9E6C01B676D"
+    },
+    {
+      "path": "dist/net10/SmsWorkbench.deps.json",
+      "size": 31151,
+      "compressed_size": 4395,
+      "crc32": "F3E58F64",
+      "sha256": "E2209F58B9DDF7A74EC649BAD7A091767858C58C5AD1F188E556B04F42746143"
+    },
+    {
+      "path": "dist/net10/SmsWorkbench.dll",
+      "size": 619008,
+      "compressed_size": 190447,
+      "crc32": "FE645813",
+      "sha256": "F915E00981E514724D509A619C9A9B4A493D55C3F3EB5C8E7D86A5718D9B234E"
+    },
+    {
+      "path": "dist/net10/SmsWorkbench.exe",
+      "size": 268800,
+      "compressed_size": 83284,
+      "crc32": "BCD58C76",
+      "sha256": "80BA9C6EDAEBBCBB58CC0EB94207EE1EB6EA127F8175C566C60E3AE500797D3C"
+    },
+    {
+      "path": "dist/net10/SmsWorkbench.pdb",
+      "size": 137376,
+      "compressed_size": 86575,
+      "crc32": "B860E24A",
+      "sha256": "85A8290AF2E891C3762AC427273E2CA6A87DCA61A0583891788CF5C1CC2F8C36"
+    },
+    {
+      "path": "dist/net10/SmsWorkbench.runtimeconfig.json",
+      "size": 586,
+      "compressed_size": 319,
+      "crc32": "A23F0F8A",
+      "sha256": "42BDF3FF1BC458718481097CB192E129BABE98117BFDCB7DA9CE75BB0AF4FBB8"
+    },
+    {
+      "path": "dist/net10/Wpf.Ui.Abstractions.dll",
+      "size": 7168,
+      "compressed_size": 3072,
+      "crc32": "905F7FBB",
+      "sha256": "DEFCD3554E362CE84BE4DBBF98A18308705BF7C16EAC5F483532DF83CB1F87FE"
+    },
+    {
+      "path": "dist/net10/Wpf.Ui.dll",
+      "size": 6565888,
+      "compressed_size": 2484734,
+      "crc32": "87E7D1E1",
+      "sha256": "966176695819E39752211DF271A53CEE7DF91F55A5E20EF9BF61FC7220FCAA1A"
+    },
+    {
+      "path": "docs/architecture.md",
+      "size": 54754,
+      "compressed_size": 19907,
+      "crc32": "C34750DC",
+      "sha256": "56280C517901AE8A7DA68A7628C2BD0A3C3D3B07729FC64F41F6E95AEBC7FF56"
+    },
+    {
+      "path": "docs/directory-map.md",
+      "size": 10770,
+      "compressed_size": 4473,
+      "crc32": "A8AC215F",
+      "sha256": "D8C9A1AD5F63C8932124043B935580DCB4B04045FAEBE42210E91024A0BDED3F"
+    },
+    {
+      "path": "docs/paypal-zero-due-link.md",
+      "size": 4963,
+      "compressed_size": 2467,
+      "crc32": "9AA728F6",
+      "sha256": "3EDE5F19325EB7F8D326CDEE4881750B4FC179EBF0695E821E28D9EF775EC074"
+    },
+    {
+      "path": "docs/README.md",
+      "size": 2823,
+      "compressed_size": 1499,
+      "crc32": "8D13931A",
+      "sha256": "3965E45F2B7E860206BF5C4E0378EE54E56EDFDD903907B43EAA92A27FF253B3"
+    },
+    {
+      "path": "docs/release-v2026.07.29.1.md",
+      "size": 2000,
+      "compressed_size": 981,
+      "crc32": "380E2400",
+      "sha256": "4687050AD203B2D8BEF8CA97BCFDCA9B8A95DC983A711642151B2E0604F2764D"
+    },
+    {
+      "path": "docs/release-v2026.07.29.md",
+      "size": 1874,
+      "compressed_size": 959,
+      "crc32": "C3C95774",
+      "sha256": "CBC7DFAB40C73BBED617DC58898BE7BA57D68B59FE37CBAF2CF029C6A8C10EDE"
+    },
+    {
+      "path": "docs/release-v2026.07.31.1.md",
+      "size": 2224,
+      "compressed_size": 1221,
+      "crc32": "C69B470F",
+      "sha256": "6CF61783F1CF73F2134DC568D4A5403CECD0A27D6D5B8A25DCEC87571F2B40E8"
+    },
+    {
+      "path": "docs/release-v2026.07.31.2.md",
+      "size": 2571,
+      "compressed_size": 1359,
+      "crc32": "294DCC70",
+      "sha256": "D03EA5B1A2C4FE76E02666DF51E319866E975711F928876F7C39DC2BAF2E87CF"
+    },
+    {
+      "path": "docs/release-v2026.07.31.md",
+      "size": 2343,
+      "compressed_size": 1111,
+      "crc32": "523EAA87",
+      "sha256": "A1F2D06E8D69D77EC432D92EF35AEC66AED1BD8E8AA4CC5D2068943F1D952443"
+    },
+    {
+      "path": "docs/release-v2026.08.01.1.md",
+      "size": 666,
+      "compressed_size": 424,
+      "crc32": "64BB976C",
+      "sha256": "42445AEDB0DA077479AD3BAB45B27FFF9959FD9FD8F3CB303B1F4290019695F3"
+    },
+    {
+      "path": "docs/release-v2026.08.01.2.md",
+      "size": 608,
+      "compressed_size": 384,
+      "crc32": "C427B7B2",
+      "sha256": "77331686EDF5F10B98D44DE445EE37DE8AE0558E50EC2C4B95A5A2A180E57DE4"
+    },
+    {
+      "path": "docs/release-v2026.08.01.md",
+      "size": 1426,
+      "compressed_size": 805,
+      "crc32": "6D2D3EEA",
+      "sha256": "D3920E71C59967E53A7510BA83B87F5F6BFD13252DE72E288DAB0E4DF05B465C"
+    },
+    {
+      "path": "docs/release-v2026.08.02.md",
+      "size": 2026,
+      "compressed_size": 1067,
+      "crc32": "D01DD98F",
+      "sha256": "F9D90F51C3936D8AEE20DB022AD3D92B220071FA4AC55955B8C3BE047D034852"
+    },
+    {
+      "path": "docs/release-v2026.08.04.md",
+      "size": 2914,
+      "compressed_size": 1429,
+      "crc32": "7C0B5CDC",
+      "sha256": "75CF70C34BFDCE175372A236684F71263B816DCBF9D68133F30A5D02D46DAD36"
+    },
+    {
+      "path": "scripts/build_installer.ps1",
+      "size": 11495,
+      "compressed_size": 2948,
+      "crc32": "18CF1EAC",
+      "sha256": "8CAFA00B72CD9004FE7F76364203675D3FE4D2D78B704A75EB4FA8ECE1554036"
+    },
+    {
+      "path": "scripts/preflight_env.py",
+      "size": 3698,
+      "compressed_size": 1729,
+      "crc32": "A0E2294B",
+      "sha256": "BF2AD29446DCA208811FA7377000D3FE9BDCAB0824C0D1AF1A57DB8AA30E9EC4"
+    },
+    {
+      "path": "scripts/probe_account_liveness.py",
+      "size": 6972,
+      "compressed_size": 2436,
+      "crc32": "45B8EDED",
+      "sha256": "A5C5515E92111DB2BF93270302BCAAA846A7FB8145D10E9BDCEE1BA94811DC56"
+    },
+    {
+      "path": "scripts/probe_paypal_regions.py",
+      "size": 11316,
+      "compressed_size": 3808,
+      "crc32": "7166EE51",
+      "sha256": "924B5B343CE7775072356731C80A478174E72295E7483192F6C762DB07FF8F68"
+    },
+    {
+      "path": "scripts/rebuild_agent_identity_batch.py",
+      "size": 10087,
+      "compressed_size": 3017,
+      "crc32": "EC67AE0C",
+      "sha256": "1A8F216CC33222A70994F21554035BA1222539D06522F7E2C950DB3DE70E1F09"
+    },
+    {
+      "path": "services/mail-otp-web/app.py",
+      "size": 30231,
+      "compressed_size": 9248,
+      "crc32": "3FF1E021",
+      "sha256": "F580D24577B2AE143B5EA0FB754B7563060D74E321BCEEE96A542662F77C5A23"
+    },
+    {
+      "path": "services/mail-otp-web/config.example.json",
+      "size": 391,
+      "compressed_size": 240,
+      "crc32": "86BFCC9D",
+      "sha256": "378FAA649D5AC7E2C6A8BF18F362421FEE73BBAA5558C661782E769E2239990D"
+    },
+    {
+      "path": "services/mail-otp-web/README.md",
+      "size": 1674,
+      "compressed_size": 851,
+      "crc32": "7A7193FA",
+      "sha256": "68D120A72BD04125BB7CAB583015663AB38C2978DDCF8AB06E84A43F30492AF0"
+    },
+    {
+      "path": "services/mail-otp-web/static/black-kitten.png",
+      "size": 29105,
+      "compressed_size": 21706,
+      "crc32": "C74BF0C7",
+      "sha256": "5C8A99EB64FE463A6502BECADDA6786FDB63F1E4CB7963A0E51375FF8AA2CB96"
+    },
+    {
+      "path": "services/mail-otp-web/static/favicon.ico",
+      "size": 105709,
+      "compressed_size": 11723,
+      "crc32": "F426A6E6",
+      "sha256": "BABEE7DBABE316B70E90C41A45223CF17007BF99233B091F7225D11A2E10D314"
+    },
+    {
+      "path": "services/protocol-payment/.gitignore",
+      "size": 119,
+      "compressed_size": 82,
+      "crc32": "E8A89351",
+      "sha256": "C245C466DF228871110459BF1DFC97AC2039D3985A43BADDBCE24AEE21E4A1CD"
+    },
+    {
+      "path": "services/protocol-payment/LICENSE",
+      "size": 1056,
+      "compressed_size": 621,
+      "crc32": "291AE1A6",
+      "sha256": "1126322E2CC8D165ADC4C792EEB195717DE2BCC7B39BE1CE77959D78E87EF685"
+    },
+    {
+      "path": "services/protocol-payment/README.md",
+      "size": 5601,
+      "compressed_size": 2551,
+      "crc32": "26EBF7C8",
+      "sha256": "7B1ABFF2BCBAEF19DED94E45DEEE3B8BAD05D7EA49A4B9C045C8D0F62B589D81"
+    },
+    {
+      "path": "services/protocol-payment/blik/blik_qr_extract.py",
+      "size": 166036,
+      "compressed_size": 33694,
+      "crc32": "E5344565",
+      "sha256": "9D2ECAB24110983B45FA6093004C889FB0CEC126B072C1CD703FBFAC82624C9E"
+    },
+    {
+      "path": "services/protocol-payment/direct_card/direct_card_extract.py",
+      "size": 46696,
+      "compressed_size": 10942,
+      "crc32": "9302354C",
+      "sha256": "7A9762ECF3A94249EDD1A203B2603EFCB7EFFEA90159C85430981B8C731CAC6B"
+    },
+    {
+      "path": "services/protocol-payment/ideal/ideal_qr_extract.py",
+      "size": 134664,
+      "compressed_size": 28381,
+      "crc32": "275F2C81",
+      "sha256": "9C7D1790FA15EE283F49CBE783D10D0BE927A061AFC0E021A7637BAB85E04527"
+    },
+    {
+      "path": "services/protocol-payment/kakao/kakao_extract.py",
+      "size": 58513,
+      "compressed_size": 15033,
+      "crc32": "BCE3BD3C",
+      "sha256": "CABEFDD161EE84D1C98BF504C521E635DDA52DB440A4D075CD4D01E42FCD3FC7"
+    },
+    {
+      "path": "services/protocol-payment/momo/ac_paylink_core.py",
+      "size": 33410,
+      "compressed_size": 9493,
+      "crc32": "7FDA641F",
+      "sha256": "455317162B1D72986B034B26FC32B217F1F22841728149D353DCF4E9E2F0AA99"
+    },
+    {
+      "path": "services/protocol-payment/momo/momo_qr_extract.py",
+      "size": 77205,
+      "compressed_size": 18774,
+      "crc32": "159C740C",
+      "sha256": "EB22AA3DBB07ABD2006837CA426AAD9EE2C04722CCA40B1199F70872B2B3AE6F"
+    },
+    {
+      "path": "services/protocol-payment/momo/run_momo.py",
+      "size": 6838,
+      "compressed_size": 2357,
+      "crc32": "436CE88F",
+      "sha256": "0927C0DD895D471B8BFB3FC114B9D3ED8ABBF57306B274707E5F879125C8797B"
+    },
+    {
+      "path": "services/protocol-payment/pix/pix_core.py",
+      "size": 40545,
+      "compressed_size": 11963,
+      "crc32": "A39EE111",
+      "sha256": "31787F59695F44E5664103EAA82DB0C0433B96F0DF8377FDBB847934D9FA46D1"
+    },
+    {
+      "path": "services/protocol-payment/pix/pix_extract.py",
+      "size": 35086,
+      "compressed_size": 8174,
+      "crc32": "E8C16552",
+      "sha256": "3727B6FE698B489D4B1D2126A286C3C77B0944C537F2CE1BA6168D485209EDA8"
+    },
+    {
+      "path": "services/protocol-payment/pix/run_pix.py",
+      "size": 3071,
+      "compressed_size": 1127,
+      "crc32": "B9C8EF6F",
+      "sha256": "CCA06FBAB62C493F155EEB9A042FD63369618F49817FE5505EF6F5AAB076BA5E"
+    },
+    {
+      "path": "services/protocol-payment/twint/twint_extract.py",
+      "size": 133903,
+      "compressed_size": 28051,
+      "crc32": "65619577",
+      "sha256": "7E7CE94C522C80D4D66AF52B3461CF7A7B73A4111363379A89EF181629B0478C"
+    },
+    {
+      "path": "SmsWorkbench/AccessTokenState.cs",
+      "size": 411,
+      "compressed_size": 245,
+      "crc32": "A432F3E7",
+      "sha256": "2AC232AA2128F9FE07195781BDB9357EDADC181D5FB3FBA465A2346E5D80094A"
+    },
+    {
+      "path": "SmsWorkbench/app.manifest",
+      "size": 509,
+      "compressed_size": 284,
+      "crc32": "7281890A",
+      "sha256": "DBA54D22F2FAEAE8AA87EFCE1D93F9D854D0722E19DFAF4FB5A7F43D63B5A2A5"
+    },
+    {
+      "path": "SmsWorkbench/App.xaml",
+      "size": 39087,
+      "compressed_size": 5345,
+      "crc32": "2BE4B239",
+      "sha256": "B37D634279AC60E5B79EADF7A9DB42F5EFB6043BE144FACE812FF39EDEE972B0"
+    },
+    {
+      "path": "SmsWorkbench/App.xaml.cs",
+      "size": 3441,
+      "compressed_size": 1127,
+      "crc32": "B914C31D",
+      "sha256": "8F7F53B8F2FFA7B583E5509C64CA6C7AFD8E1D83BBAB59786C54C64479C50D41"
+    },
+    {
+      "path": "SmsWorkbench/AppHost.cs",
+      "size": 2072,
+      "compressed_size": 705,
+      "crc32": "61B46A62",
+      "sha256": "FD50C63B3A29BDA8B12C49B7305F73198E1ADF6C7102500AA1F79F26B9510EFE"
+    },
+    {
+      "path": "SmsWorkbench/ApplicationPaths.cs",
+      "size": 1051,
+      "compressed_size": 376,
+      "crc32": "A9B46EE4",
+      "sha256": "F4BBBD92A7DE2174C7F64119DDD59EDC0D8A605F53BBC4FCE8876A0436C7EBC7"
+    },
+    {
+      "path": "SmsWorkbench/AssemblyInfo.cs",
+      "size": 93,
+      "compressed_size": 93,
+      "crc32": "806EF348",
+      "sha256": "4E489E057DE895DB6C283545368F466646088DE6472503F2A8F904BDB4F4D2AB"
+    },
+    {
+      "path": "SmsWorkbench/BackendContracts.cs",
+      "size": 1475,
+      "compressed_size": 535,
+      "crc32": "CA89D913",
+      "sha256": "3FB5739ED5E21A1295874378586A006B6507E3217421E9C83157C169FFCE3B10"
+    },
+    {
+      "path": "SmsWorkbench/BackendJsonProtocol.cs",
+      "size": 2100,
+      "compressed_size": 722,
+      "crc32": "266DF5E6",
+      "sha256": "3985AEA5C320B2488BF5E3A34453B54A4645F1FDD8943DD720298EBEB571433E"
+    },
+    {
+      "path": "SmsWorkbench/build_dotnet.ps1",
+      "size": 2353,
+      "compressed_size": 1076,
+      "crc32": "47102CF2",
+      "sha256": "A06478E64241048275B4D9C3618D3041EAE3E4E899909FAAF1DEBA19BAAD835B"
+    },
+    {
+      "path": "SmsWorkbench/clean_dotnet_workspaces.ps1",
+      "size": 2443,
+      "compressed_size": 739,
+      "crc32": "CBF0BA9B",
+      "sha256": "2FCC99A35B7FFB2DAD15901DFDFE9CE546DB3E31A6C84214E9D42BF3C45784DD"
+    },
+    {
+      "path": "SmsWorkbench/DialogFactory.cs",
+      "size": 7185,
+      "compressed_size": 1709,
+      "crc32": "782B06B9",
+      "sha256": "92026887E7321D05C40667E3389C22EA63E98FDFC570BF55904B95158914FD24"
+    },
+    {
+      "path": "SmsWorkbench/FileLauncher.cs",
+      "size": 474,
+      "compressed_size": 221,
+      "crc32": "6CE4BEC2",
+      "sha256": "ADCED20122CA507ECA8F968F53EE6112AAC927CC9330D685233467DE0D1F5E2E"
+    },
+    {
+      "path": "SmsWorkbench/GlobalUsings.cs",
+      "size": 1054,
+      "compressed_size": 339,
+      "crc32": "E864CAB4",
+      "sha256": "D159115CA3CE50FF5B8B5B65FDD0FB8755AC351A3F2048E8E6D0E2A707C2302B"
+    },
+    {
+      "path": "SmsWorkbench/MailBodyFormatter.cs",
+      "size": 1549,
+      "compressed_size": 592,
+      "crc32": "DB27DC54",
+      "sha256": "9E92300BAFE020EE50F44267091E5FF871212BBC9D27FC423ACEEF4E69C68A4D"
+    },
+    {
+      "path": "SmsWorkbench/MailboxPoolFileStore.cs",
+      "size": 9383,
+      "compressed_size": 2321,
+      "crc32": "44213A5E",
+      "sha256": "F7A256390CFCFFEBEF07C43C005560251CEE4654D009891069E96257B05AE366"
+    },
+    {
+      "path": "SmsWorkbench/MainWindow.Config.cs",
+      "size": 2528,
+      "compressed_size": 759,
+      "crc32": "EA0BAF7A",
+      "sha256": "4E798C075315B1B1A9B2644A85670F0FB2DFC69A8B0C7700ED74433BD4456615"
+    },
+    {
+      "path": "SmsWorkbench/MainWindow.ContextMenu.cs",
+      "size": 6689,
+      "compressed_size": 1746,
+      "crc32": "19C1B944",
+      "sha256": "2651E211FEEC4A7994C8169B8397804C897803BDDE7F0BC91C0AB9B2F266BF9E"
+    },
+    {
+      "path": "SmsWorkbench/MainWindow.Detail.cs",
+      "size": 21195,
+      "compressed_size": 4540,
+      "crc32": "64D1DE02",
+      "sha256": "5BEEA4F277647D7B12AAA0D18FEA7D4DCF57E60C40897FCBEEA1E38CFAECA4AB"
+    },
+    {
+      "path": "SmsWorkbench/MainWindow.Dialogs.cs",
+      "size": 242,
+      "compressed_size": 160,
+      "crc32": "43B74408",
+      "sha256": "864E288BBADBC3B4BC62C0E14312B25141B9DE85124E673A71648BF7243DF7E4"
+    },
+    {
+      "path": "SmsWorkbench/MainWindow.Export.cs",
+      "size": 44660,
+      "compressed_size": 8049,
+      "crc32": "1C8DFAB2",
+      "sha256": "E31C805874CA6807D5A327E099EA57D9D342767E116FE6E3B05DEBD8621E8778"
+    },
+    {
+      "path": "SmsWorkbench/MainWindow.Helpers.cs",
+      "size": 46060,
+      "compressed_size": 8392,
+      "crc32": "4A739442",
+      "sha256": "E7D019A11527DFF9DD340B546A62363F978FE01DD905E8236F6E3DD7F17775E5"
+    },
+    {
+      "path": "SmsWorkbench/MainWindow.Inbox.cs",
+      "size": 15513,
+      "compressed_size": 3687,
+      "crc32": "CC41155D",
+      "sha256": "07FB1F425D809284DE9726DCE8BCAB5D0C2E8BA852DE10FE2AFF96D21D9D9574"
+    },
+    {
+      "path": "SmsWorkbench/MainWindow.Navigation.cs",
+      "size": 4957,
+      "compressed_size": 1312,
+      "crc32": "F17ED42A",
+      "sha256": "60048C439A9B025ADA9207ACC651B27D7633BB64B9166B6B3D294664117415B4"
+    },
+    {
+      "path": "SmsWorkbench/MainWindow.Payment.cs",
+      "size": 48222,
+      "compressed_size": 8557,
+      "crc32": "D8C71B40",
+      "sha256": "14EC09162DB284366D23D4394239C5F6C151ED984AA96DB54DDE98C3874217ED"
+    },
+    {
+      "path": "SmsWorkbench/MainWindow.PaymentBatch.cs",
+      "size": 628,
+      "compressed_size": 343,
+      "crc32": "E1D0D1ED",
+      "sha256": "69BA0F2C4A2311687E95210C52DF2BC4E21BDB7138141F2BB064766DCB86F1A1"
+    },
+    {
+      "path": "SmsWorkbench/MainWindow.Pools.cs",
+      "size": 29453,
+      "compressed_size": 5306,
+      "crc32": "3B594F2B",
+      "sha256": "F564637A0287E37531F54175C4696D91F18222482EBBFBDBC36E7388E2C4E205"
+    },
+    {
+      "path": "SmsWorkbench/MainWindow.Register.cs",
+      "size": 39096,
+      "compressed_size": 6567,
+      "crc32": "CFE54CB9",
+      "sha256": "05F25C0D28C2DCEA584FD8781FCF6FC8307B8E3605AE4312FCBD52FFDF0B8EA9"
+    },
+    {
+      "path": "SmsWorkbench/MainWindow.SmsBower.cs",
+      "size": 11199,
+      "compressed_size": 2811,
+      "crc32": "1A56F030",
+      "sha256": "B32812332768CDE81D0675EA3915D343FB7F92C9FB9F48C7647209F3A826CDD7"
+    },
+    {
+      "path": "SmsWorkbench/MainWindow.Tasks.cs",
+      "size": 15647,
+      "compressed_size": 4307,
+      "crc32": "850E0832",
+      "sha256": "FDFE6BD6A417DFEC47223BDFDFC222DF8BD6F29DF97F2596C6DDB52FAD3B480B"
+    },
+    {
+      "path": "SmsWorkbench/MainWindow.Theme.cs",
+      "size": 11198,
+      "compressed_size": 2748,
+      "crc32": "3B4CBB7E",
+      "sha256": "D46F1FD530B09D88E0A9C41B85C0F07F0F297793ED16DCACBE440A7442C7D71D"
+    },
+    {
+      "path": "SmsWorkbench/MainWindow.xaml",
+      "size": 66779,
+      "compressed_size": 7843,
+      "crc32": "E58CEB32",
+      "sha256": "CD201423D1CB5BC3EF2B56F245085B3D7638082879C08F82D884C117A94D87C5"
+    },
+    {
+      "path": "SmsWorkbench/MainWindow.xaml.cs",
+      "size": 22178,
+      "compressed_size": 4823,
+      "crc32": "E30B18E1",
+      "sha256": "EAAA71FBD832C46B63FD09E449F7C30BF61A0767978BBCCDBD21305D23071A31"
+    },
+    {
+      "path": "SmsWorkbench/packages.lock.json",
+      "size": 16518,
+      "compressed_size": 3355,
+      "crc32": "F5D04531",
+      "sha256": "391E32F6ACEBF429293CE860E27B06A3BD2A672F707841539F53B308ACD159B3"
+    },
+    {
+      "path": "SmsWorkbench/PasswordBoxBinding.cs",
+      "size": 1781,
+      "compressed_size": 518,
+      "crc32": "8455244E",
+      "sha256": "5229DD66C646D53AE90B1907B614B9AAB9099B9F0E8636F2AAB2D6F732FAAF51"
+    },
+    {
+      "path": "SmsWorkbench/PaymentBatchDialogService.cs",
+      "size": 972,
+      "compressed_size": 315,
+      "crc32": "C060F0AA",
+      "sha256": "3441D2D92A656B8370E581EA5B07B481CCD473C4E40351F0BC9066FCCC6C134A"
+    },
+    {
+      "path": "SmsWorkbench/PaymentBatchModels.cs",
+      "size": 2685,
+      "compressed_size": 813,
+      "crc32": "CAB3AFDA",
+      "sha256": "3291BFD5FC66A31229DECB0149612F2EDDCB64BDE087671D50B2F3DE460C738B"
+    },
+    {
+      "path": "SmsWorkbench/PaymentBatchService.cs",
+      "size": 9112,
+      "compressed_size": 2403,
+      "crc32": "20EE7A31",
+      "sha256": "1A700D1AB9E3986B2365F9E261501D32942B347E68EF2C7FF2A9886414844F85"
+    },
+    {
+      "path": "SmsWorkbench/PaymentBatchViewModel.cs",
+      "size": 13677,
+      "compressed_size": 3544,
+      "crc32": "B1F6F57F",
+      "sha256": "E486514B2FDF951CFCFFCC8840A3EDF474A5E74EB24CC1CE8888D22988DD2B75"
+    },
+    {
+      "path": "SmsWorkbench/PaymentBatchWindow.xaml",
+      "size": 9471,
+      "compressed_size": 2164,
+      "crc32": "B166404E",
+      "sha256": "BF24EE051A7BA94B3EA4B33FCA06DF718A056C2ED5442BDD9AAA040C6D47A7A6"
+    },
+    {
+      "path": "SmsWorkbench/PaymentBatchWindow.xaml.cs",
+      "size": 529,
+      "compressed_size": 240,
+      "crc32": "63C2A26F",
+      "sha256": "54837BB357B79B4F32731691FBE9B10B2B8B4154ACE3367D1078D1B992C1BF10"
+    },
+    {
+      "path": "SmsWorkbench/PaymentMethods.cs",
+      "size": 4436,
+      "compressed_size": 1287,
+      "crc32": "061EDA00",
+      "sha256": "F00E9D11909B625E46B3F55543BB65FC0BA4D1C69E3BC49B4AB72F51BD4D1B1E"
+    },
+    {
+      "path": "SmsWorkbench/ProtocolPaymentExecution.cs",
+      "size": 18176,
+      "compressed_size": 3939,
+      "crc32": "284F6A72",
+      "sha256": "C93E6A336EBF9FD071D363E09DFE7B20AF3C49BBB728C84678D48C53B00FFDE7"
+    },
+    {
+      "path": "SmsWorkbench/PythonBackendClient.cs",
+      "size": 4561,
+      "compressed_size": 1374,
+      "crc32": "4F906B3D",
+      "sha256": "2A938AA07F42608987FE17490E75503ACF0D9BE934D52B187C6B4CACB1CF4B53"
+    },
+    {
+      "path": "SmsWorkbench/SettingsCatalog.cs",
+      "size": 11823,
+      "compressed_size": 2904,
+      "crc32": "ABAF11BB",
+      "sha256": "5CB0958C237D0BD1D2135AEF1E6589E53121233AD23BBA54BCB48E089C9714E9"
+    },
+    {
+      "path": "SmsWorkbench/SettingsDialogService.cs",
+      "size": 823,
+      "compressed_size": 279,
+      "crc32": "CA291C5C",
+      "sha256": "85C7F00A75901E87281942331C5B0403ADCD392BA27FF21E77D9D31AF8931E91"
+    },
+    {
+      "path": "SmsWorkbench/SettingsModels.cs",
+      "size": 2566,
+      "compressed_size": 741,
+      "crc32": "0A961D91",
+      "sha256": "448046E09E7A4764F8921C3F544C358D51F2F23EB5E3D9FB9F39AF727B626033"
+    },
+    {
+      "path": "SmsWorkbench/SettingsService.cs",
+      "size": 12425,
+      "compressed_size": 2861,
+      "crc32": "8A9C734B",
+      "sha256": "1251B583B6CE9077EC9F6D211A85CC943DAA31DE5D8377CBFBCDE73B6713580F"
+    },
+    {
+      "path": "SmsWorkbench/SettingsViewModel.cs",
+      "size": 1535,
+      "compressed_size": 581,
+      "crc32": "A86B2C14",
+      "sha256": "E1A6C97A81B9649E5CAC47C2D6EAB0996456066171BD0F1BEFC8D39B0D5DC97E"
+    },
+    {
+      "path": "SmsWorkbench/SettingsWindow.xaml",
+      "size": 12755,
+      "compressed_size": 2281,
+      "crc32": "616D4C40",
+      "sha256": "5C66C3CA0156CD57FE3E8680CAD6F77A6107B6CF95DC937087FD604548F29A63"
+    },
+    {
+      "path": "SmsWorkbench/SettingsWindow.xaml.cs",
+      "size": 298,
+      "compressed_size": 168,
+      "crc32": "9C10A36D",
+      "sha256": "8155F95FDFC9B56A00EA03AB8686339A2B9F3DE44B5B518B4887944DFE08078D"
+    },
+    {
+      "path": "SmsWorkbench/SmsBowerCatalogClient.cs",
+      "size": 8987,
+      "compressed_size": 2151,
+      "crc32": "CF5FAD14",
+      "sha256": "E20CAA710C513522DAAF4F51E3C8EB60E171F7A6B66AE5F6E7E32C4FB992A872"
+    },
+    {
+      "path": "SmsWorkbench/SmsWorkbench.csproj",
+      "size": 1097,
+      "compressed_size": 417,
+      "crc32": "56922276",
+      "sha256": "BBF9F88BFD6B144A83FCEBEA8A5397C5E60733E0A01716F8647FD73963B036B6"
+    },
+    {
+      "path": "SmsWorkbench/Assets/app-icon.ico",
+      "size": 105709,
+      "compressed_size": 11723,
+      "crc32": "F426A6E6",
+      "sha256": "BABEE7DBABE316B70E90C41A45223CF17007BF99233B091F7225D11A2E10D314"
+    },
+    {
+      "path": "SmsWorkbench/Assets/black-kitten.png",
+      "size": 29105,
+      "compressed_size": 21706,
+      "crc32": "C74BF0C7",
+      "sha256": "5C8A99EB64FE463A6502BECADDA6786FDB63F1E4CB7963A0E51375FF8AA2CB96"
+    },
+    {
+      "path": "sms_tool/account_creation.py",
+      "size": 8835,
+      "compressed_size": 2459,
+      "crc32": "A4142727",
+      "sha256": "9B79B8F087DDA482139AD408E5241FA02170456D937F7F5037D5EE9EF89B9C3D"
+    },
+    {
+      "path": "sms_tool/account_liveness.py",
+      "size": 13973,
+      "compressed_size": 4071,
+      "crc32": "0CA5F236",
+      "sha256": "DE35E41BD297169B46F6B175CAAB3FCE46F23BE3685363D27EFCB53CE86A8AAD"
+    },
+    {
+      "path": "sms_tool/account_recovery.py",
+      "size": 26655,
+      "compressed_size": 5543,
+      "crc32": "D79ADB71",
+      "sha256": "5ABBFB3D44283D4D97EB75FA32DC302A054EDD89920CA6AAE30D658AF187BBC5"
+    },
+    {
+      "path": "sms_tool/account_scan.py",
+      "size": 33424,
+      "compressed_size": 6740,
+      "crc32": "B3A78C64",
+      "sha256": "DC9048526E53B001A324088CE05075B33A72EC469318A71C04C19385795DFB30"
+    },
+    {
+      "path": "sms_tool/account_seed.py",
+      "size": 2640,
+      "compressed_size": 881,
+      "crc32": "CD55274E",
+      "sha256": "694656E32795E81BA74F66E6ABBD46B64E1BC0F29EBE7994BE4D773244D126C1"
+    },
+    {
+      "path": "sms_tool/agent_identity.py",
+      "size": 25672,
+      "compressed_size": 5597,
+      "crc32": "E3DCBDFB",
+      "sha256": "25E4C7D661ECB18459F1BCE48B695F8AE05C8148D8F66D49EC682ECA97055217"
+    },
+    {
+      "path": "sms_tool/auth_flow.py",
+      "size": 12586,
+      "compressed_size": 3084,
+      "crc32": "5A2F46D0",
+      "sha256": "EAB33103AB00F7BA2241F8A3187BB3FD195602A0259B54869C9F84595A0966FE"
+    },
+    {
+      "path": "sms_tool/auth_headers.py",
+      "size": 6366,
+      "compressed_size": 1985,
+      "crc32": "7263E902",
+      "sha256": "6A19A9BA8C5EE816296879DCBB1B14376CB8E5BC6D1D4870317E4EC9BBDBE431"
+    },
+    {
+      "path": "sms_tool/auth_state.py",
+      "size": 3966,
+      "compressed_size": 1344,
+      "crc32": "2566E006",
+      "sha256": "4BCB96DB01E23469E9B227D427C3A1E675A400FFCF60471B2866663B2845A0E6"
+    },
+    {
+      "path": "sms_tool/batch_runner.py",
+      "size": 7478,
+      "compressed_size": 2090,
+      "crc32": "2E2B69F7",
+      "sha256": "7CF6A66C7E0BBCDEC144200E8E1AA5C23C674B0EFDF7C1A74D0647761BA587E0"
+    },
+    {
+      "path": "sms_tool/captcha_solver.py",
+      "size": 28981,
+      "compressed_size": 7068,
+      "crc32": "6762BCCC",
+      "sha256": "7A29E7CB8D30C0D2F773432A7E8FC6E74D01FD0C01B589BCC57E2CEA6B313273"
+    },
+    {
+      "path": "sms_tool/checkout_contract.py",
+      "size": 13300,
+      "compressed_size": 3472,
+      "crc32": "8558513A",
+      "sha256": "FF79CF1B00BD4BDF22A3F52282BE109228C7A3853F2ACCD8549781E22C300BD0"
+    },
+    {
+      "path": "sms_tool/cli.py",
+      "size": 89890,
+      "compressed_size": 17733,
+      "crc32": "9DB71A4D",
+      "sha256": "EDF3DFD4D5254710528A4C122F32D2A19983EA860F17A73671AAC011736DFFD6"
+    },
+    {
+      "path": "sms_tool/codex_export.py",
+      "size": 19450,
+      "compressed_size": 4561,
+      "crc32": "B8C0ABB6",
+      "sha256": "861D13427899CBB8391F2DBE92E245E6F1F872517A70E780F8EDB4835A706A50"
+    },
+    {
+      "path": "sms_tool/codex_oauth.py",
+      "size": 42122,
+      "compressed_size": 8067,
+      "crc32": "39B49959",
+      "sha256": "CFDA275C35E6A99D04EE666192E1428850E7DAF9225C9A52FE09E323A9791106"
+    },
+    {
+      "path": "sms_tool/codex_phone.py",
+      "size": 4874,
+      "compressed_size": 1371,
+      "crc32": "1F56BB17",
+      "sha256": "8DDCE23E008C52D1A126E424AC2AE4199D0ECA1D3B37B74D155F6B3FBD5E00FA"
+    },
+    {
+      "path": "sms_tool/codex_sentinel.py",
+      "size": 2192,
+      "compressed_size": 762,
+      "crc32": "9A30711D",
+      "sha256": "E51880CA0C2987D9EDA8FB3A34C12CDECB646915F2A7AD4C194750E5E1562147"
+    },
+    {
+      "path": "sms_tool/config.py",
+      "size": 736,
+      "compressed_size": 322,
+      "crc32": "3BE134CD",
+      "sha256": "E15F39377D1D72FF6610B841F65FF1C34BE1727E08D1F76077EFB93BE358E308"
+    },
+    {
+      "path": "sms_tool/cpa_import.py",
+      "size": 25881,
+      "compressed_size": 5448,
+      "crc32": "698E38F0",
+      "sha256": "7BBFBBD4B0A6C684D60F965F26B37B988167D4DCAA7D952D6AD8E1CC6698DC90"
+    },
+    {
+      "path": "sms_tool/desktop_ipc.py",
+      "size": 432,
+      "compressed_size": 269,
+      "crc32": "243F3D2F",
+      "sha256": "7A333E12BE9006E01DAC0AB63718FF9615E9B7E1C00CD5C9135B40A75B160532"
+    },
+    {
+      "path": "sms_tool/error_classification.py",
+      "size": 2668,
+      "compressed_size": 962,
+      "crc32": "3436E3FA",
+      "sha256": "97BAEB80263ED3D1A9EAA95807EC136A13924665927A029EBA02EC0AD20BA08C"
+    },
+    {
+      "path": "sms_tool/gen_pp_link.py",
+      "size": 141732,
+      "compressed_size": 29747,
+      "crc32": "3D21B098",
+      "sha256": "326FF7962D6B252BC002528BAB353209B12FCBB5D77F6640F6C4C4D43FACE0B1"
+    },
+    {
+      "path": "sms_tool/http_client.py",
+      "size": 2650,
+      "compressed_size": 945,
+      "crc32": "EE78585B",
+      "sha256": "EE24135A7642EFDC958C01808D1BB884DD9AFC07979995AB68A0D4A7F423B0D6"
+    },
+    {
+      "path": "sms_tool/import_targets.py",
+      "size": 4517,
+      "compressed_size": 792,
+      "crc32": "7FB8BF3F",
+      "sha256": "3AB1C5ABF53872BA233590DECE6CEE8185C8B56BDEF32224AF7E15CF153883AD"
+    },
+    {
+      "path": "sms_tool/k12_client.py",
+      "size": 12120,
+      "compressed_size": 1985,
+      "crc32": "EC805A83",
+      "sha256": "60073C993E54A5A1170B5E5E091CAA8434BB2225F99D9E19BBBEA799D1F58F3D"
+    },
+    {
+      "path": "sms_tool/k12_identity.py",
+      "size": 7436,
+      "compressed_size": 1211,
+      "crc32": "4C0E6F57",
+      "sha256": "0034A5DBD754E799E26235D98B561BBCD8CF7C94DDB099A03D5540754BF20165"
+    },
+    {
+      "path": "sms_tool/mailbox.py",
+      "size": 33126,
+      "compressed_size": 5945,
+      "crc32": "06942994",
+      "sha256": "0C022E2BF93B9D1173E59D0AAAC3577A9414BA1085573CD3833BBCC630746D53"
+    },
+    {
+      "path": "sms_tool/mailbox_cfworker.py",
+      "size": 6552,
+      "compressed_size": 1632,
+      "crc32": "6AB36F9F",
+      "sha256": "D69040EE7F42372BB66A0F29C31C46E80110D322B8D8C3DD4311B9A2991D16A3"
+    },
+    {
+      "path": "sms_tool/mailbox_chongzhi.py",
+      "size": 9156,
+      "compressed_size": 2981,
+      "crc32": "5D492EF7",
+      "sha256": "43B4CBEC936925C567841D1E4D4F555D92CD7AF437B9C0A91A0F5AE8C50434D8"
+    },
+    {
+      "path": "sms_tool/mailbox_gmail.py",
+      "size": 20106,
+      "compressed_size": 5152,
+      "crc32": "6D7CECD6",
+      "sha256": "D9E430D6D985C7308FA09C0B786DD797F77D089BDD83B2E09498AD4D8E873190"
+    },
+    {
+      "path": "sms_tool/mailbox_graph.py",
+      "size": 1849,
+      "compressed_size": 761,
+      "crc32": "050E3BE4",
+      "sha256": "F4944268386E93AAA7FF6FD53CC2654E9BBD5B59C6B9046BAD9618254F74D7C1"
+    },
+    {
+      "path": "sms_tool/mailbox_icloud_url.py",
+      "size": 13070,
+      "compressed_size": 3714,
+      "crc32": "F63514F3",
+      "sha256": "4C5B81E36A217AC04D165D46F0D730A964170E0076670E051745CE49C6068CA8"
+    },
+    {
+      "path": "sms_tool/mailbox_parsers.py",
+      "size": 13617,
+      "compressed_size": 2309,
+      "crc32": "92D5C500",
+      "sha256": "0F47AA377C8CE935762A4F9EBCBCDE90DF559A5A2EB944939CC87502A8E816E6"
+    },
+    {
+      "path": "sms_tool/mailbox_remail.py",
+      "size": 33328,
+      "compressed_size": 8979,
+      "crc32": "BBE7ACA8",
+      "sha256": "AE4D3B1445ADEE346C0174189E92120B38342E47CF51B81738073532F55D2581"
+    },
+    {
+      "path": "sms_tool/mailbox_types.py",
+      "size": 627,
+      "compressed_size": 250,
+      "crc32": "DC9F253B",
+      "sha256": "88C2910413EC89F72019416D73A657BF19A5C8130395251714462F06118111F1"
+    },
+    {
+      "path": "sms_tool/mail_otp.py",
+      "size": 8847,
+      "compressed_size": 2677,
+      "crc32": "47C8259C",
+      "sha256": "99350D4A1F8D10F2EF4947D3C52DF20C9D8AEFA30BF724B705579941466FCD36"
+    },
+    {
+      "path": "sms_tool/nodriver_captcha.py",
+      "size": 7644,
+      "compressed_size": 2282,
+      "crc32": "65176B25",
+      "sha256": "EABAD8FB9F5176AF0FA0C4D8164D3B9E7ABE6F258B2106D3C3149BB96C23A99F"
+    },
+    {
+      "path": "sms_tool/nodriver_paypal.py",
+      "size": 15953,
+      "compressed_size": 4040,
+      "crc32": "064B7BDD",
+      "sha256": "799D7B9D057FE2841452129D6878CDB2E608EBC1F75E6FA09610C8DBFF5D6D87"
+    },
+    {
+      "path": "sms_tool/omakse_client.py",
+      "size": 18933,
+      "compressed_size": 4301,
+      "crc32": "D6BA53E8",
+      "sha256": "50584C9E53B0320D5A8521ED3FD6589FE345846FB93C314E3863E9956430E0CE"
+    },
+    {
+      "path": "sms_tool/openai_sentinel_quickjs.js",
+      "size": 12838,
+      "compressed_size": 3868,
+      "crc32": "6B5A5641",
+      "sha256": "DF9773438B0C865552C5B19BA028051E351B1BCDA4FC0E27C38262BA768FEF11"
+    },
+    {
+      "path": "sms_tool/otp_strategy.py",
+      "size": 3875,
+      "compressed_size": 1350,
+      "crc32": "E3F908B2",
+      "sha256": "EA2C882DD837BF69380627892A1C7AE5BAE4A2A61D1EBCFA43EF147B15FD35E6"
+    },
+    {
+      "path": "sms_tool/outlook_imap.py",
+      "size": 9733,
+      "compressed_size": 3033,
+      "crc32": "8D3B80C8",
+      "sha256": "7526B86C12CA4C2DCB0C0195B94800607387254B4CD871273302DBE53C218AFA"
+    },
+    {
+      "path": "sms_tool/paths.py",
+      "size": 644,
+      "compressed_size": 295,
+      "crc32": "C16B088D",
+      "sha256": "11B77BF330DA0CF9BB5E8E38FBCB911DD5120013D3F09D46B7A2536EC4FB6CB4"
+    },
+    {
+      "path": "sms_tool/payment_auth.py",
+      "size": 7348,
+      "compressed_size": 2203,
+      "crc32": "711756C2",
+      "sha256": "FB0CF1EFF73C6B4696929E4196A05F687892FA1760728DA0AFCD3544F9E095AA"
+    },
+    {
+      "path": "sms_tool/payment_batch.py",
+      "size": 23107,
+      "compressed_size": 5934,
+      "crc32": "6F44E30E",
+      "sha256": "245BD8D5AC5D12105AAAA36FAE6B81EC90D0C6E4FA605DC165FA15F5AF18A2DF"
+    },
+    {
+      "path": "sms_tool/payment_capability.py",
+      "size": 11582,
+      "compressed_size": 2626,
+      "crc32": "1A65CBC9",
+      "sha256": "740FD72D7481DD4E89121FE4A9CD5E5F46A68499D6FF8AE8DFD9A6AA3AD566D5"
+    },
+    {
+      "path": "sms_tool/payment_link_manager.py",
+      "size": 43675,
+      "compressed_size": 11440,
+      "crc32": "46E898EB",
+      "sha256": "661B9D25BE88255FEF7A2E372F4CD5DE6301952E66155300C40C9AAE0A8990E9"
+    },
+    {
+      "path": "sms_tool/paypal_auto.py",
+      "size": 84104,
+      "compressed_size": 17234,
+      "crc32": "A5B98A37",
+      "sha256": "14B0635747CC71265E3ABD316A73A01B3E43CE121B6EC4147497C0C59266843A"
+    },
+    {
+      "path": "sms_tool/paypal_links.py",
+      "size": 25045,
+      "compressed_size": 4780,
+      "crc32": "FC304283",
+      "sha256": "673AFAF1E065879B0E588E6D1C04FBC9E0B1FAF0057360C1B6BE9FF61B8A22F6"
+    },
+    {
+      "path": "sms_tool/paypal_protocol.py",
+      "size": 6824,
+      "compressed_size": 2173,
+      "crc32": "2CE15673",
+      "sha256": "FE1A5A2B50F2344268DED5E5BCE0FFBDB4187124212CB65289A27BDA69F59CEE"
+    },
+    {
+      "path": "sms_tool/paypal_proxy.py",
+      "size": 18626,
+      "compressed_size": 4496,
+      "crc32": "F3222151",
+      "sha256": "8BC28DA713D44169653B3F7D4645C47477EA1B907E96E6FA9AE3288B8ACB4347"
+    },
+    {
+      "path": "sms_tool/paypal_reconciliation.py",
+      "size": 43561,
+      "compressed_size": 8351,
+      "crc32": "5E8B0B32",
+      "sha256": "3C8A0ACD4A19C48E2319BF0EF0FDDF987C08855BD75A156F294B9FA5D2D279A2"
+    },
+    {
+      "path": "sms_tool/paypal_reverse.py",
+      "size": 47329,
+      "compressed_size": 10508,
+      "crc32": "2990D4E7",
+      "sha256": "846D7562D3A23D95DDD73F45B82F14F1A930A34B6256F41967B149CC3F157D97"
+    },
+    {
+      "path": "sms_tool/phone_proxy.py",
+      "size": 18619,
+      "compressed_size": 5122,
+      "crc32": "2543313F",
+      "sha256": "0A9EAF96792CFC207B87DE96C382C8ACF25FBE98A63C1148D6030185582B0FAF"
+    },
+    {
+      "path": "sms_tool/phone_reuse.py",
+      "size": 43560,
+      "compressed_size": 8800,
+      "crc32": "5AD48C82",
+      "sha256": "94860CDD87DBED9FCA2A26AFBE4FC261EEB5E97F8B04218CD492509C616D1CFA"
+    },
+    {
+      "path": "sms_tool/proxy_pool.py",
+      "size": 22438,
+      "compressed_size": 5261,
+      "crc32": "E9C20E69",
+      "sha256": "F5FAABD81915B30E0FE604C4EFD22B4B59111E92B2CF978D6BD3DA5B1A020937"
+    },
+    {
+      "path": "sms_tool/registration.py",
+      "size": 66095,
+      "compressed_size": 13395,
+      "crc32": "B7BE5FB9",
+      "sha256": "35CE6C680A520C718DCE2039277273F7FC95021C898D259DF90A2C41F25F41D5"
+    },
+    {
+      "path": "sms_tool/registration_concurrency.py",
+      "size": 3012,
+      "compressed_size": 1113,
+      "crc32": "EFDD5102",
+      "sha256": "45EFD4F68CA93A9B9ABFAE9636413A1A6D1823EB437FF0CB5EB20B51CE05C11F"
+    },
+    {
+      "path": "sms_tool/registration_progress.py",
+      "size": 3844,
+      "compressed_size": 1242,
+      "crc32": "693F0119",
+      "sha256": "7004D71A9D738D0E6B677B76F2B1765B43CE06CFBB0BA905C7581ACEB54E4980"
+    },
+    {
+      "path": "sms_tool/sentinel_quickjs.py",
+      "size": 10410,
+      "compressed_size": 3667,
+      "crc32": "F96A9AF2",
+      "sha256": "E71536D6E585F149CE02D6786FBD37A694B8227179903B31802259700A8E954C"
+    },
+    {
+      "path": "sms_tool/sentinel_tokens.py",
+      "size": 23471,
+      "compressed_size": 6360,
+      "crc32": "85F33C94",
+      "sha256": "396BC445B1C6A50B2EE95561263DC18E0CFB270510D7FC745074942D3AE10D9A"
+    },
+    {
+      "path": "sms_tool/session_converter.py",
+      "size": 19519,
+      "compressed_size": 4408,
+      "crc32": "314405E3",
+      "sha256": "29D95C81BBD4BA2134E56A14EF2518F799F1994B0D85F8E9DE90D50075193FDF"
+    },
+    {
+      "path": "sms_tool/session_refresh.py",
+      "size": 22179,
+      "compressed_size": 5164,
+      "crc32": "E2C7D66A",
+      "sha256": "F1DAF9902338B999138362644E00466E623FC49CB49A67004884A3B0381E4C11"
+    },
+    {
+      "path": "sms_tool/smsbower.py",
+      "size": 12100,
+      "compressed_size": 2986,
+      "crc32": "7EE4625B",
+      "sha256": "153B6D99BD91E73859094FBFEE042253F3B8C98E8E4C307F1E13E84E6469616D"
+    },
+    {
+      "path": "sms_tool/sms_provider.py",
+      "size": 1061,
+      "compressed_size": 456,
+      "crc32": "AFAAACDB",
+      "sha256": "4634D04786836E1D0DE8621EC79C7CEDA2616F4049FBA93D3CE4311EC803FA65"
+    },
+    {
+      "path": "sms_tool/storage.py",
+      "size": 31278,
+      "compressed_size": 6484,
+      "crc32": "69458302",
+      "sha256": "5560AC29E532B2158AD67BB8AC623BE2B5F6B20A3DF2C2684C04EA397E4E0BC4"
+    },
+    {
+      "path": "sms_tool/sub2api_import.py",
+      "size": 35389,
+      "compressed_size": 7695,
+      "crc32": "49DA0A2C",
+      "sha256": "C06038F6F7F858391D384CC789A4CD094C64E9C94C949AEAF490D78575EE408C"
+    },
+    {
+      "path": "sms_tool/utils.py",
+      "size": 1941,
+      "compressed_size": 833,
+      "crc32": "0CAED5DB",
+      "sha256": "8CC05CC863856A2C58EB566BE8DA2CFAF1B2358A4A80436AFAE76DD8D7849413"
+    },
+    {
+      "path": "sms_tool/wallet_provider.py",
+      "size": 31800,
+      "compressed_size": 7117,
+      "crc32": "2A016DED",
+      "sha256": "31AC1B900FBAFAE81F97166E43349CFB90DE46DA43283C895747968735FFB62B"
+    },
+    {
+      "path": "sms_tool/wallet_transport.py",
+      "size": 11317,
+      "compressed_size": 2721,
+      "crc32": "DA933C86",
+      "sha256": "E659D7840342A142AB40BEB2B00F55B16817577953F515E0D711E05E32948E72"
+    },
+    {
+      "path": "sms_tool/workspace_scan.py",
+      "size": 19066,
+      "compressed_size": 3889,
+      "crc32": "5758B0B1",
+      "sha256": "548F9300E348E371AC6E9F64E8DDB8CBCDAF064D1810D81C36EFD354F72091EA"
+    },
+    {
+      "path": "sms_tool/__init__.py",
+      "size": 69,
+      "compressed_size": 71,
+      "crc32": "EDEEEA82",
+      "sha256": "82C9F70CE2FB1A60529BEFE23E13C7FB3E3CA4B59C69B493464222FA8CC72A29"
+    },
+    {
+      "path": "sms_tool/__main__.py",
+      "size": 61,
+      "compressed_size": 57,
+      "crc32": "CF332F3C",
+      "sha256": "3129ADFF95E0F38B87AB34CDDFC27082C7892BCAEC267FF5D40F160FDF55B44A"
+    },
+    {
+      "path": "sms_tool/commands/helpers.py",
+      "size": 5022,
+      "compressed_size": 1608,
+      "crc32": "E4507D70",
+      "sha256": "81F0BFA08925A27C872F7798B8673BCF15C3F64E441838566FCC7F4CE4A56AFF"
+    },
+    {
+      "path": "sms_tool/commands/payment.py",
+      "size": 20849,
+      "compressed_size": 4368,
+      "crc32": "D481E3D4",
+      "sha256": "62C13E23A7B476A3E430BB19718F6305C0E3B5248D0774C11221024058EF0153"
+    },
+    {
+      "path": "sms_tool/commands/__init__.py",
+      "size": 68,
+      "compressed_size": 59,
+      "crc32": "8ABC07B5",
+      "sha256": "791582A5B9ACE6B37F127673C1E42823B9F9C188695723969D905815F9FB735A"
+    },
+    {
+      "path": "sms_tool/providers/cfworker_mailbox.py",
+      "size": 22604,
+      "compressed_size": 5405,
+      "crc32": "5F1391CE",
+      "sha256": "2FAAD9535781BD24D93F82C1B308894A02B35712182B6F1F5DF5C0A30535F1BF"
+    },
+    {
+      "path": "sms_tool/providers/__init__.py",
+      "size": 32,
+      "compressed_size": 34,
+      "crc32": "1412483B",
+      "sha256": "FEF5143B6B8500F0F60348EB66B5BE9A1E39DB05F77B4136C4DEDB47330BD564"
+    },
+    {
+      "path": ".editorconfig",
+      "size": 1166,
+      "compressed_size": 431,
+      "crc32": "2B226DDF",
+      "sha256": "3A221C1A1DF8B8C64ECFDE2B96DB1110279EB1B9F8173B1A78FC70059BFC6BB5"
+    },
+    {
+      "path": ".gitignore",
+      "size": 656,
+      "compressed_size": 338,
+      "crc32": "EA9D39F6",
+      "sha256": "A980FEC27EBB190523FEF389C33F4B167205EDE04B77A19DA5320008FB3D5083"
+    },
+    {
+      "path": "chatgpt_phone_reg.py",
+      "size": 147,
+      "compressed_size": 118,
+      "crc32": "3F008EA3",
+      "sha256": "62E8B2C7B2C7BFB6FF12D2DDF696B542FE426BB99692A0BA0E6C9AD58F41233E"
+    },
+    {
+      "path": "config.example.json",
+      "size": 12928,
+      "compressed_size": 3553,
+      "crc32": "94755F25",
+      "sha256": "F88EABFA50E133D8E3AE70FCD902BB08D81FFA68EF15C220A657B882970E32C6"
+    },
+    {
+      "path": "Directory.Build.props",
+      "size": 540,
+      "compressed_size": 253,
+      "crc32": "EB27BEC4",
+      "sha256": "8E5DC4259760C1841D623382B7A9B24610D182F927F952E658994596B5DB4962"
+    },
+    {
+      "path": "Directory.Packages.props",
+      "size": 842,
+      "compressed_size": 273,
+      "crc32": "C105B8BD",
+      "sha256": "BF1B87C01B1AA4E075899E6CADD0D0A1748B833F398956EBE976CE6E965A2E9D"
+    },
+    {
+      "path": "global.json",
+      "size": 111,
+      "compressed_size": 92,
+      "crc32": "FD99FADA",
+      "sha256": "A647FBC942871CEF23CE38EF75C362BD02269B0BB634AA348A4537CADC926C3F"
+    },
+    {
+      "path": "GPTRegisterTool.slnx",
+      "size": 189,
+      "compressed_size": 100,
+      "crc32": "DBAABDA5",
+      "sha256": "23B7C93BA1721743999EF4983A9D561A1637FD31826D4FC3DE047B10DA7590C0"
+    },
+    {
+      "path": "INSTALL-README.txt",
+      "size": 412,
+      "compressed_size": 281,
+      "crc32": "900D7BC0",
+      "sha256": "7783452A0DDC3AD2232B074A49F13C312147A2B293C0B6C02DD3E2224E488AD5"
+    },
+    {
+      "path": "PROXY_GUIDE.md",
+      "size": 2308,
+      "compressed_size": 1017,
+      "crc32": "5EE52654",
+      "sha256": "0FC6BD2561D9A678906713C51FDDC62477D86977BFB346A7440975D02D0A538A"
+    },
+    {
+      "path": "pytest.ini",
+      "size": 45,
+      "compressed_size": 38,
+      "crc32": "9FF250D5",
+      "sha256": "E621DABB0551D82E234C399C39D035481D1B20A1CCBEB7A3ADE640FC9DD1A151"
+    },
+    {
+      "path": "README.md",
+      "size": 27244,
+      "compressed_size": 11337,
+      "crc32": "7BE63B39",
+      "sha256": "8D6E426BF6D63AD7BD47F336F67F743FE9387C7C72EF5C9CE862415EEFC189B3"
+    },
+    {
+      "path": "requirements.txt",
+      "size": 416,
+      "compressed_size": 299,
+      "crc32": "3D21264F",
+      "sha256": "2B11DCE97D580B64F6096CCC9E4506402A1C386E93003BD1252891994FE49F07"
+    },
+    {
+      "path": "Start-SmsWorkbench.cmd",
+      "size": 81,
+      "compressed_size": 75,
+      "crc32": "E944541E",
+      "sha256": "1F7DEE93CF39E02D07F696A6D0365100DAFC81E2912240D37BC13EA26E39C644"
+    },
+    {
+      "path": "start_proxy_pool.py",
+      "size": 5402,
+      "compressed_size": 1785,
+      "crc32": "D82B5307",
+      "sha256": "DF816E510FE3D037CDF05C43B24E728E370576E9933DAA0C48843297FC5E05ED"
+    },
+    {
+      "path": "verify_proxy.py",
+      "size": 3359,
+      "compressed_size": 1078,
+      "crc32": "6947696E",
+      "sha256": "2013E4DFAAA3E1B5FF7E38A4B62B6F13F6A8C3FB16BF6B6EE6612E835F9FD07D"
+    }
+  ]
+}

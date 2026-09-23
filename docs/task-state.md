@@ -6,7 +6,7 @@
 
 ## 当前任务
 
-将 `E:\code\FB-Outlook-register\OutlookRegisterPlus` 的 Outlook 注册后端完整纳入主项目，并由主项目启动脚本统一管理。
+修复 GitHub Actions 中安装包分析测试因归档证据未被 Git 跟踪而失败的问题，并通过新 PR 合入主分支。
 
 ## 验收标准
 
@@ -19,7 +19,11 @@
 - [x] Vue 控制台兼容上游嵌套状态，并暴露 OAuth2、辅助邮箱和代理配置
 - [x] 前端类型检查通过，16 个测试文件 / 119 个测试通过
 - [x] Outlook 后端 Python 编译通过，8001 `/api/health` 与 `/api/register` 冒烟通过
+- [x] 定位 GitHub Actions 失败原因为 `artifacts/reverse/...` 被 `.gitignore` 整体排除
+- [x] 仅纳入测试和只读分析接口所需的清单、报告与 MoMo 源文件，不提交安装器和 payload 压缩包
+- [x] 本地完整验证通过：后端 755 passed / 13 skipped，MailCom 14 passed，前端 119 passed，类型检查和生产构建通过
 - [ ] 在具备真实代理、Chromium、验证码和 OAuth2 环境下执行完整端到端注册验证
+- [x] GitHub Actions 新 PR 检查通过（run `35834509733`，2026-09-23）
 
 ## 已完成
 
@@ -32,7 +36,7 @@
 
 ## 进行中
 
-确认真实 Outlook、代理、验证码和 OAuth2 环境下的注册任务。
+修复 PR #2 已创建并通过 GitHub Actions，等待合并。
 
 ## 待处理
 
@@ -46,7 +50,8 @@
 - 独立任务完成后必须提交 commit；需要合并的任务必须创建或更新对应 PR。
 - Outlook 注册后端使用独立 8001 端口，主 FastAPI 保持 8000，避免路由和依赖冲突。
 - 当前 Vue 页面复用上游注册 API，不复制上游独立 Web 前端；上游 API 的池、结果和接码接口仍随后端保留。
+- 安装包分析接口继续使用 `artifacts/reverse/GPT-Register-Tool-Setup-v2026.08.05` 作为只读证据源；Git 只跟踪必要清单、报告和 MoMo 源码，忽略原始 EXE、ZIP 和其余 payload。清单中的机器绝对路径在载入时归一为相对/文件名形式。
 
 ## 下一步
 
-已执行 `npm run type-check`、`npm test`、Python 编译和 8001 API 冒烟；下一步唯一动作是运行一次真实注册链路。
+合并 PR #2；随后恢复真实 Outlook 注册链路的端到端验证。
