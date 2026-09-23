@@ -23,7 +23,7 @@
 - [x] 仅纳入测试和只读分析接口所需的清单、报告与 MoMo 源文件，不提交安装器和 payload 压缩包
 - [x] 本地完整验证通过：后端 755 passed / 13 skipped，MailCom 14 passed，前端 119 passed，类型检查和生产构建通过
 - [ ] 在具备真实代理、Chromium、验证码和 OAuth2 环境下执行完整端到端注册验证
-- [ ] GitHub Actions 新 PR 检查通过
+- [x] GitHub Actions 新 PR 检查通过（run `35834509733`，2026-09-23）
 
 ## 已完成
 
@@ -36,7 +36,7 @@
 
 ## 进行中
 
-提交修复分支并等待 GitHub Actions 验证。
+修复 PR #2 已创建并通过 GitHub Actions，等待合并。
 
 ## 待处理
 
@@ -54,4 +54,4 @@
 
 ## 下一步
 
-推送 `codex/fix-ci-installation-evidence` 并创建修复 PR，等待 GitHub Actions 结果。
+合并 PR #2；随后恢复真实 Outlook 注册链路的端到端验证。
