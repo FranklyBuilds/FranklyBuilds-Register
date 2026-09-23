@@ -62,7 +62,12 @@ class PaidAccountMfaBackfill:
         self.resources = MongoResourceStore(self.mongo)
         self.probes = MongoProbeStore(self.mongo)
         self.settings_store = settings_store or SettingsStore()
-        self.mailbox = mailbox or MailboxClient()
+        if mailbox is not None:
+            self.mailbox = mailbox
+        else:
+            from .outlook_service import MongoOutlookMailboxClient
+
+            self.mailbox = MongoOutlookMailboxClient(self.mongo)
         self.artifact_root = Path(artifact_root)
 
     async def _open_browser_with_recovery(
@@ -227,6 +232,7 @@ class PaidAccountMfaBackfill:
             "accessUrl": str(account["emailAccessUrl"]),
             "mailboxKind": account.get("mailboxKind"),
             "mailboxPassword": account.get("mailboxPassword"),
+            "outlookAccountId": account.get("outlookAccountId"),
         }
         access_url = mailbox_source_for_document(source)
         local_totp_secret = str(account.get("totpSecret") or "")

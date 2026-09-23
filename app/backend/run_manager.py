@@ -1095,12 +1095,24 @@ class ProtocolRegistrationRunExecutor:
         self,
         *,
         service_factory: Callable[..., ProtocolRegistrationService] = ProtocolRegistrationService,
-        mailbox_factory: Callable[[], MailboxClient] = MailboxClient,
+        mailbox_factory: Callable[[], MailboxClient] | None = None,
         sentinel_provider: SentinelProvider | None = None,
     ) -> None:
         self.service_factory = service_factory
         self.mailbox_factory = mailbox_factory
         self.sentinel_provider = sentinel_provider or AutoSentinelProvider()
+
+    def _mailbox_client(self, context: RunExecutionContext) -> MailboxClient:
+        if self.mailbox_factory is not None:
+            return self.mailbox_factory()
+        manager = getattr(context.resources, "manager", None)
+        if manager is None:
+            # Unit/custom executors may provide a narrow resource fake without
+            # Mongo access; retain the standard URL-backed mailbox behavior.
+            return MailboxClient()
+        from .outlook_service import MongoOutlookMailboxClient
+
+        return MongoOutlookMailboxClient(manager)
 
     async def execute(self, context: RunExecutionContext) -> bool:
         if context.probe_store is None or context.worker_store is None:
@@ -1254,7 +1266,7 @@ class ProtocolRegistrationRunExecutor:
                     otp_provider = (
                         StaticOtpProvider(default=str(static_otp))
                         if static_otp
-                        else MailboxOtpProvider(self.mailbox_factory())
+                        else MailboxOtpProvider(self._mailbox_client(context))
                     )
 
                     async def progress(name: str, details: Mapping[str, Any]) -> None:

@@ -238,7 +238,14 @@ class BrowserProbeRunner:
             else roxy_factory
         )
         self.automation_factory = automation_factory
-        self.mailbox = mailbox_client or MailboxClient()
+        if mailbox_client is not None:
+            self.mailbox = mailbox_client
+        elif mongo_manager is not None:
+            from .outlook_service import MongoOutlookMailboxClient
+
+            self.mailbox = MongoOutlookMailboxClient(self.mongo)
+        else:
+            self.mailbox = MailboxClient()
         self.debug_show_code = debug_show_code
         self.workspace_ready_timeout_seconds = workspace_ready_timeout_seconds
         self.workspace_retry_interval_seconds = workspace_retry_interval_seconds

@@ -130,11 +130,13 @@ export interface EmailRecord {
   email: string
   accessUrl: string
   importedAt: string
-  sourceType?: 'manual' | 'mailcom_alias'
+  sourceType?: 'manual' | 'mailcom_alias' | 'outlook'
   parentEmail?: string | null
+  outlookAccountId?: string | null
+  assignmentStatus?: 'available' | 'reserved' | 'assigned' | 'unavailable'
 }
 
-export type EmailSource = 'all' | 'standard' | 'mailcom_alias'
+export type EmailSource = 'all' | 'standard' | 'mailcom_alias' | 'outlook'
 
 export type ProxyStatus = 'available' | 'unknown' | 'quarantined'
 export type ProxyScheme = 'http' | 'https' | 'socks5' | 'socks5h'
@@ -320,7 +322,7 @@ export interface OverviewStats {
     plus: { total: number; bound: number; unbound: number }
     free: { total: number; eligible: number; ineligible: number }
   }
-  emails: { available: number; aliases: number }
+  emails: { available: number; aliases: number; outlook: number }
   proxies: { total: number; enabled: number; available: number; quarantined: number }
 }
 

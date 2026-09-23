@@ -147,8 +147,7 @@ flowchart LR
 所有服务默认绑定回环地址：
 
 - 前端：<http://127.0.0.1:5173>
-- 后端：<http://127.0.0.1:8000>
-- Outlook 注册 API：<http://127.0.0.1:8001>
+- 后端（含 Outlook 管理、OAuth 与 Graph 邮箱）：<http://127.0.0.1:8000>
 - API 文档：<http://127.0.0.1:8000/api/docs>
 - MailCom Hub：<http://127.0.0.1:3211>
 - RoxyBrowser OpenAPI：`127.0.0.1:50000`

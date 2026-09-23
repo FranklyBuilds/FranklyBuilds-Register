@@ -30,10 +30,10 @@ if (Test-Path -LiteralPath $mailComStop) {
     & $mailComStop
 }
 
-foreach ($name in @('frontend', 'backend', 'outlook-register', 'easy-proxies', 'resin')) {
+foreach ($name in @('frontend', 'backend', 'easy-proxies', 'resin')) {
     Stop-SavedProcess $name
 }
-foreach ($port in @(5173, 8000, 8001, 9091, 2260, 3211, 18796, 18098)) {
+foreach ($port in @(5173, 8000, 9091, 2260, 3211, 18796, 18098)) {
     Stop-PortOwner $port
 }
 

@@ -193,8 +193,8 @@ onBeforeUnmount(() => {
   <section>
     <div class="page-heading">
       <div>
-        <h2>待使用邮箱</h2>
-        <p>注册成功后邮箱会移出此列表，接码地址快照保留在账号记录中。</p>
+        <h2>邮箱池</h2>
+        <p>展示可用邮箱与已分配 Outlook 关联；Outlook OAuth 凭据仅在 Outlook 管理接口中处理。</p>
       </div>
     </div>
 
@@ -220,6 +220,7 @@ onBeforeUnmount(() => {
             <el-option label="全部来源" value="all" />
             <el-option label="普通邮箱" value="standard" />
             <el-option label="分裂邮箱" value="mailcom_alias" />
+            <el-option label="Outlook 邮箱" value="outlook" />
           </el-select>
           <span class="muted">已选择 {{ selectedIds.length }} 条</span>
         </div>
@@ -253,7 +254,7 @@ onBeforeUnmount(() => {
         @select="handleSelect"
         @select-all="handleSelectAll"
       >
-        <el-table-column type="selection" width="48" />
+        <el-table-column type="selection" width="48" :selectable="(row: EmailRecord) => row.sourceType !== 'outlook'" />
         <el-table-column label="邮箱" min-width="260">
           <template #default="{ row }">
             <div class="email-entry">
@@ -261,7 +262,7 @@ onBeforeUnmount(() => {
               <div>
                 <strong>{{ row.email }}</strong>
                 <small>
-                  {{ row.sourceType === 'mailcom_alias' ? `分裂邮箱 · 主邮箱 ${row.parentEmail || '未知'}` : '普通邮箱 · 等待分配' }}
+                  {{ row.sourceType === 'mailcom_alias' ? `分裂邮箱 · 主邮箱 ${row.parentEmail || '未知'}` : row.sourceType === 'outlook' ? `Outlook · ${row.assignmentStatus || 'available'}` : '普通邮箱 · 等待分配' }}
                 </small>
               </div>
             </div>
@@ -269,25 +270,35 @@ onBeforeUnmount(() => {
         </el-table-column>
         <el-table-column label="来源" width="110">
           <template #default="{ row }">
-            <el-tag :type="row.sourceType === 'mailcom_alias' ? 'success' : 'info'" effect="plain">
-              {{ row.sourceType === 'mailcom_alias' ? '分裂邮箱' : '普通邮箱' }}
+            <el-tag :type="row.sourceType === 'mailcom_alias' ? 'success' : row.sourceType === 'outlook' ? 'warning' : 'info'" effect="plain">
+              {{ row.sourceType === 'mailcom_alias' ? '分裂邮箱' : row.sourceType === 'outlook' ? 'Outlook' : '普通邮箱' }}
             </el-tag>
           </template>
         </el-table-column>
         <el-table-column label="接码地址" min-width="390">
           <template #default="{ row }">
-            <SecretCell :value="row.accessUrl" :visible-chars="18" /><!-- gitleaks:allow -->
+            <SecretCell v-if="row.sourceType !== 'outlook'" :value="row.accessUrl" :visible-chars="18" />
+            <span v-else class="muted">Graph 关联 · 不导出凭据</span><!-- gitleaks:allow -->
           </template>
         </el-table-column>
         <el-table-column label="导入时间" width="160">
           <template #default="{ row }"><span class="muted">{{ formatDate(row.importedAt) }}</span></template>
         </el-table-column>
         <el-table-column label="状态" width="105">
-          <template #default><el-tag type="success" effect="dark" round>可用</el-tag></template>
+          <template #default="{ row }">
+            <el-tag
+              :type="row.assignmentStatus === 'assigned' ? 'warning' : row.assignmentStatus === 'unavailable' ? 'danger' : row.assignmentStatus === 'reserved' ? 'info' : 'success'"
+              effect="dark"
+              round
+            >
+              {{ row.assignmentStatus === 'assigned' ? '已分配' : row.assignmentStatus === 'reserved' ? '预留中' : row.assignmentStatus === 'unavailable' ? '不可用' : '可用' }}
+            </el-tag>
+          </template>
         </el-table-column>
         <el-table-column label="操作" width="90" fixed="right">
           <template #default="{ row }">
-            <el-button text type="primary" @click="openExport('single', row)">导出</el-button>
+            <el-button v-if="row.sourceType !== 'outlook'" text type="primary" @click="openExport('single', row)">导出</el-button>
+            <span v-else class="muted">由 Outlook 账号页管理</span>
           </template>
         </el-table-column>
       </el-table>
