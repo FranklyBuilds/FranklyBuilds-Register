@@ -197,6 +197,12 @@ def _read_manifest() -> dict[str, Any]:
         raise InstallationAnalysisError("安装包解析清单损坏") from exc
     if not isinstance(value, dict) or not isinstance(value.get("installer"), dict):
         raise InstallationAnalysisError("安装包解析清单格式不受支持")
+    # The checked-in manifest is portable evidence; its generator's machine-
+    # specific absolute paths must never leak through the runtime API.
+    for key in ("source_path", "archived_installer", "payload_zip", "analysis_report", "payload_directory"):
+        raw = str(value.get(key) or "").strip()
+        if raw:
+            value[key] = Path(raw).name if Path(raw).is_absolute() else raw
     return value
 
 
