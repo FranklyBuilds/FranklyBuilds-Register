@@ -262,6 +262,180 @@ class FakePlanCheckService:
         )
 
 
+
+
+class _OutlookFakeCursor:
+    def __init__(self, rows):
+        self.rows = list(rows)
+    def sort(self, key, direction=1):
+        self.rows.sort(key=lambda row: str(row.get(key) or ""), reverse=direction < 0)
+        return self
+    def skip(self, count):
+        self.rows = self.rows[count:]
+        return self
+    def limit(self, count):
+        self.rows = self.rows[:count]
+        return self
+    async def to_list(self, length=None):
+        import copy
+        rows = self.rows if length is None else self.rows[:length]
+        return copy.deepcopy(rows)
+
+
+class _OutlookFakeCollection:
+    def __init__(self, rows=()):
+        import copy
+        self.rows = {str(row["_id"]): copy.deepcopy(row) for row in rows}
+    def _match(self, row, query):
+        for key, expected in query.items():
+            if key in ("$or", "$and"):
+                checks = [self._match(row, item) for item in expected]
+                if (key == "$or" and not any(checks)) or (key == "$and" and not all(checks)): return False
+            elif isinstance(expected, dict):
+                actual = row.get(key)
+                if "$in" in expected and actual not in expected["$in"]: return False
+                if "$nin" in expected and actual in expected["$nin"]: return False
+                if "$exists" in expected and (key in row) != bool(expected["$exists"]): return False
+                if "$regex" in expected:
+                    import re
+                    if re.search(expected["$regex"], str(actual or ""), re.I if expected.get("$options") == "i" else 0) is None: return False
+            elif row.get(key) != expected:
+                return False
+        return True
+    @staticmethod
+    def _project(row, projection):
+        import copy
+        if not projection: return copy.deepcopy(row)
+        if any(value for value in projection.values()):
+            result = {"_id": row.get("_id")}
+            result.update({key: copy.deepcopy(row[key]) for key, value in projection.items() if value and key in row})
+            return result
+        result = copy.deepcopy(row)
+        for key, value in projection.items():
+            if not value: result.pop(key, None)
+        return result
+    async def create_index(self, *_args, **_kwargs): return "fake-index"
+    async def count_documents(self, query): return sum(self._match(row, query) for row in self.rows.values())
+    def find(self, query, projection=None): return _OutlookFakeCursor([self._project(row, projection) for row in self.rows.values() if self._match(row, query)])
+    async def find_one(self, query, projection=None):
+        for row in self.rows.values():
+            if self._match(row, query): return self._project(row, projection)
+        return None
+    async def distinct(self, field, query): return list(dict.fromkeys(row.get(field) for row in self.rows.values() if self._match(row, query) and row.get(field) is not None))
+    async def update_one(self, query, update, upsert=False):
+        from types import SimpleNamespace
+        for key, row in self.rows.items():
+            if self._match(row, query):
+                values = update.get("$set", {})
+                modified = any(row.get(field) != value for field, value in values.items())
+                row.update(values)
+                for field in update.get("$unset", {}): row.pop(field, None)
+                return SimpleNamespace(matched_count=1, modified_count=int(modified), upserted_id=None)
+        if upsert:
+            row = dict(query)
+            row.update(update.get("$setOnInsert", {}))
+            row.update(update.get("$set", {}))
+            row.setdefault("_id", row.get("emailNormalized", "generated"))
+            self.rows[str(row["_id"])] = row
+            return SimpleNamespace(matched_count=0, modified_count=0, upserted_id=row["_id"])
+        return SimpleNamespace(matched_count=0, modified_count=0, upserted_id=None)
+    async def update_many(self, query, update):
+        from types import SimpleNamespace
+        changed = 0
+        for row in self.rows.values():
+            if self._match(row, query):
+                before = dict(row); row.update(update.get("$set", {}))
+                for field in update.get("$unset", {}): row.pop(field, None)
+                changed += int(row != before)
+        return SimpleNamespace(matched_count=changed, modified_count=changed)
+    async def insert_one(self, document):
+        from types import SimpleNamespace
+        import copy
+        self.rows[str(document["_id"])] = copy.deepcopy(document)
+        return SimpleNamespace(inserted_id=document["_id"])
+    async def delete_one(self, query):
+        from types import SimpleNamespace
+        for key, row in list(self.rows.items()):
+            if self._match(row, query): self.rows.pop(key); return SimpleNamespace(deleted_count=1)
+        return SimpleNamespace(deleted_count=0)
+
+
+
+
+async def run_migration_twice(store, migration):
+    first = await migration(store)
+    second = await migration(store)
+    return first, second
+
+
+def test_outlook_legacy_migration_is_idempotent_and_preserves_source_files(tmp_path: Path, monkeypatch) -> None:
+    import asyncio
+    import hashlib
+    import json
+    import stat
+    from backend import outlook_service
+    from backend.outlook_service import OutlookStore, migrate_legacy_outlook_data
+    from backend.resource_service import MongoResourceStore
+
+    results = tmp_path / "Results"
+    results.mkdir()
+    sources = {
+        "pool.json": json.dumps({"accounts": [{"email": "A@Outlook.Test", "password": "pw1", "client_id": "client1", "refresh_token": "refresh1"}]}),
+        "oauth2.txt": "a@outlook.test----pw2----client2----refresh2\nB@outlook.test----pw3----client3----refresh3\n",
+        "registered.txt": "b@outlook.test----pw4\nC@outlook.test----pw5\n",
+    }
+    raw = {}
+    for name, content in sources.items():
+        path = results / name
+        path.write_text(content, encoding="utf-8")
+        raw[name] = path.read_bytes()
+    monkeypatch.setattr(outlook_service, "RESULTS_ROOT", results)
+    manager = _OutlookFakeManager()
+    manager._test_database["outlook_accounts"] = _OutlookFakeCollection()
+    store = OutlookStore(MongoResourceStore(manager))
+
+    first, second = asyncio.run(run_migration_twice(store, migrate_legacy_outlook_data))
+
+    assert first["parsedAccounts"] == 3
+    assert first["imported"] == 3
+    assert second["imported"] == 0 and second["duplicates"] == 3
+    assert len(manager.database["outlook_accounts"].rows) == 3
+    for name, before in raw.items():
+        path = results / name
+        assert path.read_bytes() == before
+        digest = hashlib.sha256(before).hexdigest()[:16]
+        backup = results / f"{name}.pre-mongo.{digest}.bak"
+        assert backup.read_bytes() == before
+        assert not (backup.stat().st_mode & stat.S_IWUSR)
+    assert not any(path.suffix == ".tmp" for path in results.iterdir())
+
+
+
+class _OutlookFakeDatabase(dict):
+    def __getitem__(self, name):
+        if name not in self: self[name] = _OutlookFakeCollection()
+        return super().__getitem__(name)
+
+
+class _OutlookFakeManager(FakeOnlineMongo):
+    def __init__(self):
+        super().__init__(uri="mongodb://127.0.0.1:1", database_name="outlook-test")
+        self._test_database = _OutlookFakeDatabase({
+            "accounts": _OutlookFakeCollection(), "emails": _OutlookFakeCollection(),
+            "proxies": _OutlookFakeCollection([
+                {"_id": "proxy1", "host": "proxy.example.test", "port": 8080, "username": "SECRET_USER", "password": "SECRET_PROXY", "enabled": True, "status": "available", "country": "US", "group": "shared", "scheme": "http", "createdAt": "2026-01-01"}
+            ]), "outlook_accounts": _OutlookFakeCollection([
+                {"_id": "outlook1", "email": "me@outlook.test", "emailNormalized": "me@outlook.test", "password": "SECRET_PASSWORD", "clientId": "SECRET_CLIENT", "refreshToken": "SECRET_REFRESH", "oauthStatus": "unknown", "graphStatus": "unknown", "source": "manual", "createdAt": "2026-01-01"}
+            ]), "email_change_runs": _OutlookFakeCollection(), "runs": _OutlookFakeCollection(),
+            "outlook_migrations": _OutlookFakeCollection(),
+        })
+    @property
+    def database(self): return self._test_database
+    async def start(self): self.online = True
+    async def stop(self): self.online = False
+
+
+
 def test_promotion_check_api_uses_account_id_batch(tmp_path: Path) -> None:
     manager = FakeOnlineMongo(
         uri="mongodb://127.0.0.1:1", database_name="plan_api_test"
@@ -574,6 +748,9 @@ def test_proxy_upsert_keeps_mutable_fields_out_of_set_on_insert() -> None:
         def __init__(self) -> None:
             self.update: dict | None = None
 
+        async def find_one(self, _identity):
+            return None
+
         async def update_one(self, _identity, update, *, upsert):
             assert upsert is True
             self.update = update
@@ -622,6 +799,9 @@ def test_mailcom_alias_upsert_avoids_mongodb_path_conflicts() -> None:
     class CapturingCollection:
         def __init__(self) -> None:
             self.update: dict | None = None
+
+        async def find_one(self, _identity):
+            return None
 
         async def update_one(self, _identity, update, *, upsert):
             assert upsert is True
@@ -792,3 +972,242 @@ def test_access_token_export_contains_only_valid_tokens_and_reports_skips() -> N
     assert result.skippedMissingCount == 1
     assert result.skippedExpiredCount == 1
     assert "EXPIRED_TEST_AT" not in result.content
+
+
+def test_outlook_graph_and_mailbox_apis_use_mock_transport_and_gate_publication(tmp_path: Path, monkeypatch) -> None:
+    import httpx
+
+    manager = _OutlookFakeManager()
+    manager._test_database["outlook_accounts"] = _OutlookFakeCollection([
+        {"_id": "ok", "email": "me@outlook.test", "emailNormalized": "me@outlook.test", "password": "LOCAL_SECRET", "clientId": "CLIENT_SECRET", "refreshToken": "REFRESH_SECRET", "oauthStatus": "unknown", "graphStatus": "unknown", "source": "manual", "createdAt": "2026-01-01"},
+        {"_id": "bad", "email": "other@outlook.test", "emailNormalized": "other@outlook.test", "clientId": "BAD_CLIENT_SECRET", "refreshToken": "BAD_REFRESH_SECRET", "oauthStatus": "unknown", "graphStatus": "unknown", "source": "manual", "createdAt": "2026-01-02"},
+    ])
+    monkeypatch.setattr("backend.outlook_service.RESULTS_ROOT", tmp_path / "missing-results")
+    app = create_app(settings_path=tmp_path / "settings.json", log_dir=tmp_path / "logs", mongo_manager=manager)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "login.microsoftonline.com" or request.url.path.endswith("/token"):
+            assert request.content
+            bad_account = b"BAD_CLIENT_SECRET" in request.content
+            assert b"refresh_token=" in request.content
+            token = "ACCESS_BAD_SECRET" if bad_account else "ACCESS_SECRET"
+            refresh = "ROTATED_BAD_SECRET" if bad_account else "ROTATED_SECRET"
+            return httpx.Response(200, json={"access_token": token, "refresh_token": refresh})
+        bad_account = request.headers.get("Authorization") == "Bearer ACCESS_BAD_SECRET"
+        assert request.headers.get("Authorization") in {"Bearer ACCESS_SECRET", "Bearer ACCESS_BAD_SECRET"}
+        if request.url.path.endswith("/me"):
+            email = "wrong@outlook.test" if bad_account else "me@outlook.test"
+            return httpx.Response(200, json={"id": "graph-user", "mail": email, "userPrincipalName": email})
+        if request.url.path.endswith("/messages/msg-1"):
+            return httpx.Response(200, json={"id": "msg-1", "subject": "Login code", "from": {"emailAddress": {"address": "sender@example.test", "name": "Sender"}}, "receivedDateTime": "2026-01-01T00:00:00Z", "bodyPreview": "code 123456", "body": {"contentType": "text", "content": "code 123456"}})
+        if "/mailFolders/" in request.url.path:
+            return httpx.Response(200, json={"value": [{"id": "msg-1", "subject": "Login code", "from": {"emailAddress": {"address": "sender@example.test", "name": "Sender"}}, "receivedDateTime": "2026-01-01T00:00:00Z", "isRead": False, "bodyPreview": "code 123456", "hasAttachments": False, "toRecipients": [{"emailAddress": {"address": "me@outlook.test"}}], "body": {"contentType": "text", "content": "code 123456"}}]})
+        return httpx.Response(404)
+
+    real_client = httpx.AsyncClient
+    def factory(**kwargs):
+        return real_client(transport=httpx.MockTransport(handler), **kwargs)
+    app.state.outlook_service.http_client_factory = factory
+    client = TestClient(app)
+
+    oauth = client.post("/api/outlook/accounts/ok/check-oauth")
+    assert oauth.status_code == 200 and oauth.json()["ok"] is True
+    assert manager.database["emails"].rows == {}
+
+    graph = client.post("/api/outlook/accounts/ok/check-graph")
+    assert graph.status_code == 200 and graph.json()["poolStatus"] == "available", graph.json()
+    mailbox = next(iter(manager.database["emails"].rows.values()))
+    assert mailbox["sourceType"] == "outlook" and mailbox["outlookAccountId"] == "ok"
+    oauth_again = client.post("/api/outlook/accounts/ok/check-oauth")
+    assert oauth_again.status_code == 200
+    assert oauth_again.json()["graphStatus"] == "ok"
+    assert mailbox["status"] == "available"
+    messages = client.get("/api/outlook/accounts/ok/messages")
+    assert messages.status_code == 200 and messages.json()["messages"][0]["id"] == "msg-1"
+    detail = client.get("/api/outlook/accounts/ok/messages/msg-1")
+    assert detail.status_code == 200 and "123456" in detail.json()["message"]["body"]
+    mailbox["status"] = "assigned"
+    assigned_messages = client.get("/api/outlook/accounts/ok/messages")
+    assert assigned_messages.status_code == 200
+    pool = client.get("/api/emails?source=outlook")
+    assert pool.status_code == 200 and pool.json()["items"][0]["assignmentStatus"] == "assigned"
+    assert pool.json()["items"][0]["outlookAccountId"] == "ok"
+    assert all(secret not in pool.text for secret in ("LOCAL_SECRET", "CLIENT_SECRET", "REFRESH_SECRET"))
+    public = client.get("/api/outlook/accounts")
+    assert all(secret not in public.text for secret in ("LOCAL_SECRET", "CLIENT_SECRET", "REFRESH_SECRET", "ROTATED_SECRET", "ROTATED_BAD_SECRET", "ACCESS_SECRET", "ACCESS_BAD_SECRET"))
+
+    mismatch = client.post("/api/outlook/accounts/bad/check-graph")
+    assert mismatch.status_code == 200 and mismatch.json()["graphStatus"] == "error"
+    assert "bad" not in manager.database["emails"].rows
+
+
+def test_outlook_mailbox_client_reads_graph_mail_for_otp_polling() -> None:
+    import asyncio
+    import httpx
+    from backend.outlook_service import MongoOutlookMailboxClient
+
+    manager = _OutlookFakeManager()
+    manager.database["outlook_accounts"].rows["outlook1"].update({
+        "oauthStatus": "ok",
+        "graphStatus": "ok",
+    })
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.host == "login.microsoftonline.com":
+            return httpx.Response(200, json={"access_token": "ACCESS", "refresh_token": "ROTATED"})
+        return httpx.Response(200, json={"value": [{
+            "id": "otp-1",
+            "subject": "OpenAI verification code",
+            "receivedDateTime": "2026-09-24T00:00:00Z",
+            "bodyPreview": "Your verification code is 654321",
+            "body": {"contentType": "text", "content": "Your verification code is 654321"},
+            "toRecipients": [{"emailAddress": {"address": "me@outlook.test"}}],
+        }]})
+
+    transport = httpx.MockTransport(handler)
+    client = MongoOutlookMailboxClient(manager)
+    client.outlook_service.http_client_factory = lambda **kwargs: httpx.AsyncClient(
+        transport=transport, **kwargs
+    )
+    snapshot = asyncio.run(client.get_snapshot(
+        "outlook://outlook1", "me@outlook.test", purpose="verification"
+    ))
+
+    assert snapshot.verification_code == "654321"
+    assert snapshot.received_at_utc is not None
+    assert any(request.url.path.endswith("/mailFolders/inbox/messages") for request in requests)
+    assert manager.database["outlook_accounts"].rows["outlook1"]["refreshToken"] == "ROTATED"
+
+
+def test_outlook_publication_does_not_take_over_an_existing_manual_mailbox() -> None:
+    import asyncio
+    from backend.outlook_service import OutlookStore
+    from backend.resource_service import MongoResourceStore
+
+    manager = _OutlookFakeManager()
+    manual = {
+        "_id": "manual-mailbox",
+        "email": "me@outlook.test",
+        "emailNormalized": "me@outlook.test",
+        "accessUrl": "https://mail.example.test/inbox/me",
+        "status": "available",
+        "sourceType": "manual",
+        "mailboxKind": "url",
+    }
+    manager.database["emails"].rows[manual["_id"]] = dict(manual)
+    account = manager.database["outlook_accounts"].rows["outlook1"]
+    account.update({"oauthStatus": "ok", "graphStatus": "ok"})
+    store = OutlookStore(MongoResourceStore(manager))
+
+    result = asyncio.run(store.publish_if_valid("outlook1"))
+
+    assert result == "conflict"
+    assert manager.database["emails"].rows["manual-mailbox"] == manual
+    assert account["poolStatus"] == "conflict"
+
+
+def test_outlook_list_and_proxy_api_hide_private_credentials(tmp_path: Path) -> None:
+    manager = _OutlookFakeManager()
+    app = create_app(settings_path=tmp_path / "settings.json", log_dir=tmp_path / "logs", mongo_manager=manager)
+    client = TestClient(app)
+    listed = client.get("/api/outlook/accounts")
+    assert listed.status_code == 200
+    encoded = listed.text
+    assert "hasClientId" in encoded and "hasRefreshToken" in encoded
+    assert all(secret not in encoded for secret in ("SECRET_PASSWORD", "SECRET_CLIENT", "SECRET_REFRESH"))
+    detail = client.get("/api/outlook/accounts/outlook1")
+    assert detail.status_code == 200
+    assert all(secret not in detail.text for secret in ("SECRET_PASSWORD", "SECRET_CLIENT", "SECRET_REFRESH"))
+    missing = client.get("/api/outlook/accounts/missing")
+    assert missing.status_code == 404
+    proxies = client.get("/api/outlook/proxies")
+    assert proxies.status_code == 200
+    assert "shared" in proxies.text and "proxy.example.test" in proxies.text
+    assert "SECRET_USER" not in proxies.text and "SECRET_PROXY" not in proxies.text
+    groups = client.get("/api/outlook/proxy-groups")
+    assert groups.status_code == 200
+    assert "shared" in groups.text
+    results = client.get("/api/outlook/results")
+    assert results.status_code == 200
+    assert all(secret not in results.text for secret in ("SECRET_PASSWORD", "SECRET_CLIENT", "SECRET_REFRESH"))
+
+
+
+
+def test_outlook_import_is_idempotent_and_export_is_local_only(tmp_path: Path) -> None:
+    manager = _OutlookFakeManager()
+    app = create_app(settings_path=tmp_path / "settings.json", log_dir=tmp_path / "logs", mongo_manager=manager)
+    client = TestClient(app, client=("127.0.0.1", 50000))
+    payload = {
+        "accounts": [
+            {"email": "New@Outlook.Test", "password": "IMPORT_PASSWORD", "clientId": "IMPORT_CLIENT", "refreshToken": "IMPORT_REFRESH"},
+            {"email": "new@outlook.test", "password": "DUPLICATE_PASSWORD", "clientId": "OTHER_CLIENT", "refreshToken": "OTHER_REFRESH"},
+        ]
+    }
+    imported = client.post("/api/outlook/import", json=payload)
+    assert imported.status_code == 200
+    assert imported.json() == {"total": 2, "imported": 1, "duplicates": 1, "errors": 0}
+    repeated = client.post("/api/outlook/import", json=payload)
+    assert repeated.status_code == 200
+    assert repeated.json() == {"total": 2, "imported": 0, "duplicates": 2, "errors": 0}
+    rows = manager.database["outlook_accounts"].rows
+    created = next(row for row in rows.values() if row["email"] == "new@outlook.test")
+    assert created["refreshToken"] == "IMPORT_REFRESH"
+    assert created["clientId"] == "IMPORT_CLIENT"
+    edited = client.patch(f"/api/outlook/accounts/{created['_id']}", json={"clientId": "UPDATED_CLIENT"})
+    assert edited.status_code == 200
+    assert edited.json()["account"]["oauthStatus"] == "unknown"
+    public = client.get("/api/outlook/accounts")
+    emails = client.get("/api/emails?source=outlook")
+    assert public.status_code == emails.status_code == 200
+    assert all(secret not in public.text + emails.text for secret in (
+        "IMPORT_PASSWORD", "IMPORT_CLIENT", "IMPORT_REFRESH", "DUPLICATE_PASSWORD", "OTHER_CLIENT", "OTHER_REFRESH"
+    ))
+
+    exported = client.post("/api/outlook/export", json={"ids": [created["_id"]]})
+    assert exported.status_code == 200
+    assert exported.text == "new@outlook.test----IMPORT_PASSWORD----UPDATED_CLIENT----IMPORT_REFRESH\n"
+    assert exported.headers["cache-control"] == "no-store"
+    remote = TestClient(app, client=("192.0.2.10", 50000)).post("/api/outlook/export", json={"ids": [created["_id"]]})
+    assert remote.status_code == 403
+
+
+
+def test_successful_protocol_registration_keeps_assigned_outlook_mailbox_link() -> None:
+    from datetime import datetime, timedelta, timezone
+
+    manager = _OutlookFakeManager()
+    manager._test_database["emails"] = _OutlookFakeCollection([
+        {
+            "_id": "outlook:assigned-1",
+            "email": "assigned@outlook.test",
+            "emailNormalized": "assigned@outlook.test",
+            "accessUrl": "outlook://outlook-1",
+            "mailboxKind": "outlook_graph",
+            "sourceType": "outlook",
+            "outlookAccountId": "outlook-1",
+            "status": "reserved",
+            "reservedBy": "run-1",
+            "reservationKind": "registration",
+        }
+    ])
+    source = {
+        **next(iter(manager.database["emails"].rows.values())),
+    }
+    account = asyncio.run(
+        MongoResourceStore(manager).complete_protocol_registration_success(
+            source,
+            "run-1",
+            access_token="ACCESS_TOKEN_FIXTURE",
+            access_token_expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+        )
+    )
+    mailbox = manager.database["emails"].rows["outlook:assigned-1"]
+    persisted_account = manager.database["accounts"].rows[account.id]
+    assert mailbox["status"] == "assigned"
+    assert mailbox["outlookAccountId"] == "outlook-1"
+    assert "reservedBy" not in mailbox
+    assert persisted_account["outlookAccountId"] == "outlook-1"
+    assert persisted_account["emailAccessUrl"] == "outlook://outlook-1"

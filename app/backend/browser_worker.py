@@ -341,12 +341,15 @@ async def _run_worker(
         database_name=str(config["mongoDatabase"]),
     )
     worker_store = MongoRunWorkerStore(mongo)
+    from .outlook_service import MongoOutlookMailboxClient
+
     runner = BrowserProbeRunner(
         settings,
         workspace_id=int(config["workspaceId"]),
         hold_seconds=0,
         artifact_writer=ArtifactWriter(Path(config["artifactDir"])),
         mongo_manager=mongo,
+        mailbox_client=MongoOutlookMailboxClient(mongo),
         reserved_email_id=str(config["emailId"]),
         reservation_owner=str(config["runId"]),
         controller_lock_enabled=False,

@@ -151,9 +151,9 @@ npm.cmd run dev
 - 父任务持有共享 workspace 租约；每个 worker 仍只处理一个邮箱，并使用独立进程、临时 `dirId`、代理、Cookie/存储和产物目录。worker 退出并清理窗口后才复用并发槽位启动下一进程。
 - 父调度器按 worker 完成事件的到达顺序监控 Roxy 基础设施：`roxy_api_failed`、`roxy_api_unavailable`、`roxy_workspace_not_ready`、`roxy_browser_not_ready`、`browser_cleanup_failed` 或 `cdp_connection_failed` 连续出现 5 次时立即熔断，`roxy_auth_failed` 则立即熔断。成功、部分成功或页面流程类失败会清零连续计数。熔断后不再启动新 worker，也不会自动重启 Roxy；在途 worker 会进入安全取消和清理，未处理邮箱释放回池，已成功账号保留，整批任务以 `failed / roxy_circuit_open` 结束。
 - 前端真实任务与手动 `browser_probe` CLI 通过 MongoDB `browser_probe_controller` 租约互斥。
-- 成功邮箱从邮箱池物理删除；失败、取消和中断任务释放未完成邮箱。
+- 成功的手动/MailCom 邮箱从邮箱池物理删除；Outlook 邮箱标记为已分配并保留账号关联，便于后续 Graph 收信。失败、取消和中断任务会释放未完成邮箱。
 - 协议注册成功时先原子写入账号与 Access Token，再消费预留邮箱；缺失或已过期的 Access Token 会释放邮箱并记为失败。
-- Outlook 注册后端已随本项目内置在 `app/outlook_register/`，由根目录启动脚本自动监听 `127.0.0.1:8001`。控制台的“Outlook 注册”页面直接调用该服务，支持 Outlook/Hotmail 注册、验证码策略、代理池、OAuth2 refresh token、辅助邮箱绑定、任务日志和结果池；配置和结果分别保存在该目录下的 `config.json`、`Results/` 与 `log/`。
+- Outlook 账号、OAuth 状态与 Graph 收件箱由主 FastAPI（8000）和同一 MongoDB 管理；邮箱池仅在 OAuth 与 Graph 连通性都验证通过后发布 Outlook 来源。旧 `app/outlook_register/Results/` 数据在首次主服务启动时按邮箱幂等迁移，原文件保留并创建只读备份。普通邮箱列表只显示来源与分配状态，不包含 Outlook OAuth 凭据。
 - FastAPI 重启后，遗留活动任务标记为 `interrupted`，不会自动续跑。
 - 注册 worker 成功提取并保存 AT 后，会由同一 Playwright 页面跳转 `accounts/check/v4-2023-04-27` JSON 接口，按 JWT 内 `chatgpt_account_id` 选择账号并解析套餐、订阅与 Plus 试用资格，随后恢复 ChatGPT 主页。资格查询失败不会回滚已注册账号或 AT，只在账号记录中保存脱敏错误码。
 - 账号池支持单账号和选中账号优惠资格查询，统一调用 `POST /api/accounts/check-promotion`。后端使用 `curl_cffi`，每个查询从代理池独占一个 HTTP 代理租约，请求完成或异常后必定释放；单次最多 100 个账号，服务端并发最多 3 个且受可用代理数限制。

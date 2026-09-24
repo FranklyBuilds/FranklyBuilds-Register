@@ -1,70 +1,51 @@
-export interface OutlookRegisterConfig {
-  email_suffix?: string
-  headless?: boolean
-  bot_protection_wait?: number
-  max_captcha_retries?: number
-  captcha_strategy?: number
-  concurrent_flows?: number
-  tasks?: number
-  success_tasks?: number | null
-  batch_success_limit?: number
-  proxy?: {
-    mode?: 'single' | 'multiple'
-    type?: 'http' | 'https' | 'socks5' | 'socks5h'
-    host?: string
-    single_port?: number
-    port_start?: number
-    port_end?: number
-    max_per_proxy?: number
-  }
-  oauth2?: Record<string, unknown>
-  temp_mail?: Record<string, unknown>
+import type { EmailRecord, ProxyGroupSummary } from '@/types'
+
+export interface OutlookAccount {
+  id: string
+  email: string
+  oauthStatus: string
+  oauthCheckedAt: string | null
+  graphStatus: string
+  graphCheckedAt: string | null
+  lastError: string | null
+  poolStatus: 'available' | 'reserved' | 'assigned' | 'unavailable' | 'conflict' | 'not_published'
+  outlookEmailId: string | null
+  importedAt: string
+  source: string
+  hasClientId: boolean
+  hasRefreshToken: boolean
 }
 
-export interface OutlookRegisterState extends OutlookRegisterConfig {
-  enabled?: boolean
-  config?: OutlookRegisterConfig
-  status?: string
-  stats?: Record<string, unknown>
-  failure_stats?: Record<string, unknown>
-  result_count?: number
-  log_path?: string
-  logs?: Array<{ ts?: string; level?: string; line?: string }>
-  running?: boolean
+export interface OutlookMessage {
+  id: string
+  subject: string
+  from: string
+  fromName: string
+  receivedAt: string
+  isRead: boolean
+  preview: string
+  hasAttachments: boolean
 }
 
-const BASE_KEY = 'outlookRegister.apiBase'
-const TOKEN_KEY = 'outlookRegister.adminToken'
-
-export function getOutlookBaseUrl() {
-  try {
-    return localStorage.getItem(BASE_KEY) || 'http://127.0.0.1:8001'
-  } catch {
-    return 'http://127.0.0.1:8001'
-  }
+export interface OutlookImportResult { total: number; imported: number; duplicates: number; errors: number }
+export interface OutlookExportInput { ids?: string[] | null }
+export interface OutlookProxy {
+  id: string; host: string; port: number; enabled: boolean; status: string
+  latencyMs: number | null; country: string; group: string; scheme: string
+}
+export interface OutlookRegisterStats {
+  submitted?: number; succeeded?: number; failed?: number; running?: number
+  status?: string; tasks?: number; success_tasks?: number | null
+}
+export interface OutlookRegisterSnapshot {
+  enabled: boolean; config: Record<string, any>; stats: OutlookRegisterStats
+  failure_stats?: Record<string, number>; result_count?: number
 }
 
-export function setOutlookConnection(baseUrl: string, token: string) {
-  localStorage.setItem(BASE_KEY, baseUrl.trim().replace(/\/$/, ''))
-  localStorage.setItem(TOKEN_KEY, token.trim())
-}
-
-function headers(json = false) {
-  const result: Record<string, string> = {}
-  if (json) result['Content-Type'] = 'application/json'
-  try {
-    const token = localStorage.getItem(TOKEN_KEY) || ''
-    if (token) result.Authorization = `Bearer ${token}`
-  } catch {
-    // localStorage is optional in non-browser tests.
-  }
-  return result
-}
-
-async function request<T>(path: string, init: RequestInit = {}) {
-  const response = await fetch(`${getOutlookBaseUrl()}${path}`, {
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const response = await fetch(path, {
     ...init,
-    headers: { ...headers(Boolean(init.body)), ...(init.headers || {}) },
+    headers: { ...(init.body ? { 'Content-Type': 'application/json' } : {}), ...(init.headers || {}) },
   })
   const raw = await response.text()
   let body: any = null
@@ -77,12 +58,27 @@ async function request<T>(path: string, init: RequestInit = {}) {
 }
 
 export const outlookGateway = {
-  health: () => request<{ ok: boolean; service?: string }>('/api/health'),
-  getRegister: () => request<OutlookRegisterState>('/api/register'),
-  saveRegister: (config: OutlookRegisterConfig) => request<OutlookRegisterState>('/api/register', {
-    method: 'POST', body: JSON.stringify(config),
-  }),
-  start: () => request<OutlookRegisterState>('/api/register/start', { method: 'POST' }),
-  stop: () => request<OutlookRegisterState>('/api/register/stop', { method: 'POST' }),
-  reset: () => request<OutlookRegisterState>('/api/register/reset', { method: 'POST' }),
+  list: (query: { page?: number; pageSize?: number; q?: string; source?: string; poolStatus?: string } = {}) => {
+    const params = new URLSearchParams()
+    for (const [key, value] of Object.entries(query)) if (value !== undefined && value !== '') params.set(key, String(value))
+    return request<{ items: OutlookAccount[]; total: number; page: number; pageSize: number }>(`/api/outlook/accounts?${params}`)
+  },
+  update: (id: string, changes: { password?: string; clientId?: string; refreshToken?: string }) => request<{ account: OutlookAccount }>(`/api/outlook/accounts/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(changes) }),
+  remove: (id: string) => request<{ deleted: number }>(`/api/outlook/accounts/${encodeURIComponent(id)}/delete`, { method: 'POST' }),
+  results: (limit = 100, q = '') => request<Array<{ email: string; oauthStatus: string; graphStatus: string; createdAt: string }>>(`/api/outlook/results?${new URLSearchParams({ limit: String(limit), q })}`),
+  proxies: (page = 1, pageSize = 100) => request<{ items: OutlookProxy[]; total: number; page: number; pageSize: number }>(`/api/outlook/proxies?page=${page}&pageSize=${pageSize}`),
+  proxyGroups: () => request<ProxyGroupSummary[]>('/api/outlook/proxy-groups'),
+  registerStatus: () => request<OutlookRegisterSnapshot>('/api/outlook/register'),
+  import: (accounts: Array<{ email: string; password?: string; clientId?: string; refreshToken?: string }>) => request<OutlookImportResult>('/api/outlook/import', { method: 'POST', body: JSON.stringify({ accounts }) }),
+  migration: () => request<{ summary?: Record<string, unknown> | null; lastRunAt?: string | null; error?: string }>('/api/outlook/migration'),
+  migrateLegacy: () => request<Record<string, unknown>>('/api/outlook/import-legacy', { method: 'POST' }),
+  checkOauth: (id: string) => request<{ ok: boolean; oauthStatus: string; graphStatus: string; poolStatus: string; error?: string }>(`/api/outlook/accounts/${encodeURIComponent(id)}/check-oauth`, { method: 'POST' }),
+  checkGraph: (id: string) => request<{ ok: boolean; oauthStatus: string; graphStatus: string; poolStatus: string; error?: string }>(`/api/outlook/accounts/${encodeURIComponent(id)}/check-graph`, { method: 'POST' }),
+  messages: (id: string, top = 20) => request<{ email: string; messages: OutlookMessage[] }>(`/api/outlook/accounts/${encodeURIComponent(id)}/messages?top=${top}`),
+  message: (id: string, messageId: string) => request<{ email: string; message: OutlookMessage & { body: string; bodyType: string } }>(`/api/outlook/accounts/${encodeURIComponent(id)}/messages/${encodeURIComponent(messageId)}`),
+  export: (ids?: string[]) => request<string>('/api/outlook/export', { method: 'POST', body: JSON.stringify({ ids: ids?.length ? ids : null }) }),
+}
+
+export function asOutlookEmail(row: OutlookAccount): Pick<EmailRecord, 'sourceType' | 'outlookAccountId'> {
+  return { sourceType: 'outlook', outlookAccountId: row.id }
 }

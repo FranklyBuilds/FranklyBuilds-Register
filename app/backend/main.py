@@ -32,7 +32,7 @@ from .email_change_adapter import build_default_email_change_adapter
 from .email_change_models import EmailChangeCreate, EmailChangeRun
 from .email_change_service import EmailChangeService
 from .email_change_store import MongoEmailChangeStore
-from .mailbox_client import MailboxClient
+from .outlook_service import OutlookService, OutlookStore, migrate_legacy_outlook_data
 from .mongo_manager import MongoManager
 from .payment_tools import (
     AccessTokenExtractInput,
@@ -211,6 +211,8 @@ def create_app(
     mongo = mongo_manager or MongoManager()
     resource_store = MongoResourceStore(mongo)
     resource_service = ResourceService(resource_store)
+    outlook_store = OutlookStore(resource_store)
+    outlook_service = OutlookService(outlook_store)
     proxy_subscription_service = ProxySubscriptionService(resource_service)
     proxy_health_scheduler = ProxyHealthScheduler(proxy_subscription_service)
     probe_store = MongoProbeStore(mongo)
@@ -224,7 +226,9 @@ def create_app(
         extractor_service,
         agreement_service,
     )
-    email_change_mailbox = MailboxClient()
+    from .outlook_service import MongoOutlookMailboxClient
+
+    email_change_mailbox = MongoOutlookMailboxClient(mongo)
     email_change_store = MongoEmailChangeStore(resource_store)
     configured_email_change_service = email_change_service or EmailChangeService(
         store=email_change_store,
@@ -264,6 +268,8 @@ def create_app(
         probe_store=probe_store,
         worker_store=worker_store,
     )
+    mongo.add_reconnect_callback(resource_store.ensure_indexes)
+    mongo.add_reconnect_callback(outlook_store.ensure_indexes)
     mongo.add_reconnect_callback(run_manager.recover)
     mongo.add_reconnect_callback(probe_store.ensure_indexes)
     mongo.add_reconnect_callback(account_pipeline.ensure_indexes)
@@ -274,6 +280,20 @@ def create_app(
     async def lifespan(_app: FastAPI):
         run_log_store.prune_terminal_runs()
         await mongo.start()
+        if mongo.online:
+            await resource_store.ensure_indexes()
+            await outlook_store.ensure_indexes()
+            try:
+                _app.state.outlook_migration_fallback = await migrate_legacy_outlook_data(outlook_store)
+            except Exception as exc:
+                # Keep the primary console available if a legacy file is locked
+                # or its immutable backup cannot be created. The Outlook page
+                # surfaces the sanitized state and manual migration can retry.
+                _app.state.outlook_migration_fallback = {
+                    "summary": None,
+                    "lastRunAt": None,
+                    "error": f"{type(exc).__name__}: legacy Outlook migration failed",
+                }
         await account_pipeline.start()
         await proxy_health_scheduler.start()
         await global_promotion_service.start()
@@ -306,6 +326,7 @@ def create_app(
         lifespan=lifespan,
     )
     app.include_router(sandbox_checkout_router)
+    app.include_router(outlook_service.router())
 
     @app.middleware("http")
     async def payment_workbench_auth(request: Request, call_next):
@@ -332,6 +353,14 @@ def create_app(
     app.state.mongo_manager = mongo
     app.state.resource_store = resource_store
     app.state.resource_service = resource_service
+    app.state.outlook_store = outlook_store
+    app.state.outlook_service = outlook_service
+    async def get_outlook_migration_status():
+        document = await resource_store.manager.database["outlook_migrations"].find_one({"_id": "legacy-outlook-v1"}, {"summary": 1, "lastRunAt": 1})
+        return document or app.state.outlook_migration_fallback
+
+    app.state.outlook_migration_fallback = {"summary": None, "lastRunAt": None}
+    app.state.outlook_migration_status = get_outlook_migration_status
     app.state.proxy_subscription_service = proxy_subscription_service
     app.state.proxy_health_scheduler = proxy_health_scheduler
     app.state.probe_store = probe_store
@@ -1154,7 +1183,7 @@ def create_app(
         page: PageNumber = 1,
         page_size: PageSizeOption = Query(PageSizeOption.TEN, alias="pageSize"),
         q: SearchQuery = "",
-        source: Annotated[str, Query(pattern="^(all|standard|mailcom_alias)$")] = "all",
+        source: Annotated[str, Query(pattern="^(all|standard|mailcom_alias|outlook)$")] = "all",
     ) -> Page[EmailRecord]:
         mongo.require_online()
         return await resource_store.list_emails(page, int(page_size), q, source)  # type: ignore[arg-type]

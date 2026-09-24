@@ -315,12 +315,16 @@ class _Manager:
         accounts: list[dict[str, Any]] | None = None,
         emails: list[dict[str, Any]] | None = None,
         runs: list[dict[str, Any]] | None = None,
+        outlook_accounts: list[dict[str, Any]] | None = None,
+        migrations: list[dict[str, Any]] | None = None,
     ) -> None:
         self.online = True
         self.database = {
             "accounts": _Collection(accounts),
             "emails": _Collection(emails),
             "email_change_runs": _Collection(runs),
+            "outlook_accounts": _Collection(outlook_accounts),
+            "outlook_migrations": _Collection(migrations),
         }
 
     def require_online(self) -> None:
@@ -484,6 +488,42 @@ def test_manual_account_without_source_loses_to_concurrent_email_change_reservat
         assert set(accounts) == {"account-1"}
         target = manager.database["emails"].documents["target"]
         assert target["reservationKind"] == "email_change"
+
+    asyncio.run(scenario())
+
+
+def test_outlook_account_creation_keeps_assigned_graph_mailbox_and_association() -> None:
+    async def scenario() -> None:
+        manager = _Manager(
+            emails=[
+                _mailbox(
+                    "outlook:account-1",
+                    "target@example.com",
+                    accessUrl="outlook://account-1",
+                    mailboxKind="outlook_graph",
+                    sourceType="outlook",
+                    outlookAccountId="account-1",
+                )
+            ]
+        )
+        manager.database["emails"]._indexes.append({"keys": [("emailNormalized", 1)], "unique": True, "sparse": False, "partial": None})
+        resources = MongoResourceStore(manager)
+        created = await resources.create_account(
+            AccountCreate(
+                email="target@example.com",
+                chatgptPassword="password",
+                totpSecret="totp-secret",
+                emailAccessUrl="outlook://account-1",
+                sourceEmailId="outlook:account-1",
+            )
+        )
+        mailbox = manager.database["emails"].documents["outlook:account-1"]
+        account = manager.database["accounts"].documents[created.id]
+        assert mailbox["status"] == "assigned"
+        assert mailbox["outlookAccountId"] == "account-1"
+        assert account["mailboxKind"] == "outlook_graph"
+        assert account["outlookAccountId"] == "account-1"
+        assert account["emailAccessUrl"] == "outlook://account-1"
 
     asyncio.run(scenario())
 
@@ -1430,5 +1470,47 @@ def test_finish_remote_rejection_clears_only_the_current_unconfirmed_boundary() 
         ) is None
         confirmed = manager.database["email_change_runs"].documents["confirmed"]
         assert confirmed["remoteConfirmed"] is True
+
+    asyncio.run(scenario())
+
+
+def test_releasing_outlook_target_checks_oauth_and_graph_before_republishing() -> None:
+    async def scenario() -> None:
+        manager = _Manager(
+            accounts=[_account("gpt-1", "gpt@example.com")],
+            emails=[_mailbox("target", "target@example.com", sourceType="outlook", outlookAccountId="outlook-1", mailboxKind="outlook_graph")],
+            outlook_accounts=[{"_id": "outlook-1", "oauthStatus": "ok", "graphStatus": "error"}],
+        )
+        store = _store(manager)
+        await store.ensure_indexes()
+        run = await store.create_run("gpt-1", "target")
+        run["reservationOwner"] = f"email-change:{run['runId']}"
+
+        assert await store.release_target(run)
+        target = manager.database["emails"].documents["target"]
+        assert target["status"] == "unavailable"
+        assert target.get("reservedBy") is None
+        assert target["outlookAccountId"] == "outlook-1"
+
+    asyncio.run(scenario())
+
+
+def test_releasing_valid_outlook_target_returns_it_to_available_pool() -> None:
+    async def scenario() -> None:
+        manager = _Manager(
+            accounts=[_account("gpt-1", "gpt@example.com")],
+            emails=[_mailbox("target", "target@example.com", sourceType="outlook", outlookAccountId="outlook-1", mailboxKind="outlook_graph")],
+            outlook_accounts=[{"_id": "outlook-1", "oauthStatus": "ok", "graphStatus": "ok"}],
+        )
+        store = _store(manager)
+        await store.ensure_indexes()
+        run = await store.create_run("gpt-1", "target")
+        run["reservationOwner"] = f"email-change:{run['runId']}"
+
+        assert await store.release_target(run)
+        target = manager.database["emails"].documents["target"]
+        assert target["status"] == "available"
+        assert target.get("reservationKind") is None
+        assert target["outlookAccountId"] == "outlook-1"
 
     asyncio.run(scenario())

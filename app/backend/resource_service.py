@@ -120,11 +120,13 @@ def email_source_filter(source: str | None) -> dict[str, Any]:
     normalized = str(source or "all").strip().casefold()
     if normalized == "mailcom_alias":
         return {"sourceType": "mailcom_alias"}
+    if normalized == "outlook":
+        return {"sourceType": "outlook"}
     if normalized == "standard":
         return {
             "$or": [
                 {"sourceType": {"$exists": False}},
-                {"sourceType": {"$ne": "mailcom_alias"}},
+                {"sourceType": {"$nin": ["mailcom_alias", "outlook"]}},
             ]
         }
     return {}
@@ -276,6 +278,9 @@ class MongoResourceStore:
                 name="emails_status_imported",
             )
             await self.emails.create_index(
+                [("outlookAccountId", ASCENDING)], sparse=True, name="emails_outlook_account"
+            )
+            await self.emails.create_index(
                 [
                     ("status", ASCENDING),
                     ("lastAttemptAt", ASCENDING),
@@ -306,6 +311,7 @@ class MongoResourceStore:
         # recovery must never release an in-flight target mailbox.
         query: dict[str, Any] = {
             "status": "reserved",
+            "sourceType": {"$ne": "outlook"},
             "$or": [
                 {"reservationKind": {"$exists": False}},
                 {"reservationKind": {"$ne": "email_change"}},
@@ -322,7 +328,63 @@ class MongoResourceStore:
                 },
             )
         )
-        return int(result.modified_count)
+        # Outlook reservations retain their association across restarts and are
+        # made available only when both OAuth and Graph checks still pass.
+        outlook_orphan_query: dict[str, Any] = {
+            "status": "reserved",
+            "sourceType": "outlook",
+            "$or": [
+                {"reservationKind": {"$exists": False}},
+                {"reservationKind": {"$ne": "email_change"}},
+            ],
+        }
+        if active_run_ids:
+            outlook_orphan_query["reservedBy"] = {"$nin": active_run_ids}
+        outlook_orphans = await self._guard(
+            self.emails.find(outlook_orphan_query).to_list(length=None)
+        )
+        outlook_available = outlook_unavailable = 0
+        if outlook_orphans:
+            account_ids = list(dict.fromkeys(
+                str(item.get("outlookAccountId") or "")
+                for item in outlook_orphans
+                if item.get("outlookAccountId")
+            ))
+            accounts = await self._guard(
+                self.manager.database["outlook_accounts"].find(
+                    {
+                        "_id": {"$in": account_ids},
+                        "oauthStatus": "ok",
+                        "graphStatus": "ok",
+                    },
+                    {"_id": 1},
+                ).to_list(length=len(account_ids))
+            )
+            valid_ids = {str(item["_id"]) for item in accounts}
+            for email in outlook_orphans:
+                valid = str(email.get("outlookAccountId") or "") in valid_ids
+                update = await self._guard(
+                    self.emails.update_one(
+                        {
+                            "_id": email["_id"],
+                            "status": "reserved",
+                            "reservedBy": email.get("reservedBy"),
+                            "$or": [
+                                {"reservationKind": {"$exists": False}},
+                                {"reservationKind": {"$ne": "email_change"}},
+                            ],
+                        },
+                        {
+                            "$set": {"status": "available" if valid else "unavailable"},
+                            "$unset": {"reservedBy": "", "reservedAt": "", "reservationKind": ""},
+                        },
+                    )
+                )
+                if valid:
+                    outlook_available += int(update.modified_count)
+                else:
+                    outlook_unavailable += int(update.modified_count)
+        return int(result.modified_count + outlook_available + outlook_unavailable)
 
     async def reconcile_run_reservations(self, run_id: str) -> tuple[int, int]:
         """Finalize already-created accounts, then release every other reservation."""
@@ -349,7 +411,7 @@ class MongoResourceStore:
                     }
                 )
             )
-            if account is not None:
+            if account is not None and email.get("sourceType") != "outlook":
                 result = await self._guard(
                     self.emails.delete_one(
                         {
@@ -363,7 +425,32 @@ class MongoResourceStore:
                     )
                 )
                 consumed += int(result.deleted_count)
+            elif account is not None:
+                result = await self._guard(
+                    self.emails.update_one(
+                        {
+                            "_id": email["_id"],
+                            "reservedBy": run_id,
+                            "$or": [
+                                {"reservationKind": {"$exists": False}},
+                                {"reservationKind": {"$ne": "email_change"}},
+                            ],
+                        },
+                        {"$set": {"status": "assigned", "assignedAt": utc_now()}, "$unset": {"reservedBy": "", "reservedAt": "", "reservationKind": ""}},
+                    )
+                )
+                consumed += int(result.modified_count)
             else:
+                release_status = "available"
+                if email.get("sourceType") == "outlook":
+                    outlook = await self._guard(
+                        self.manager.database["outlook_accounts"].find_one(
+                            {"_id": email.get("outlookAccountId")},
+                            {"oauthStatus": 1, "graphStatus": 1},
+                        )
+                    )
+                    if not outlook or outlook.get("oauthStatus") != "ok" or outlook.get("graphStatus") != "ok":
+                        release_status = "unavailable"
                 result = await self._guard(
                     self.emails.update_one(
                         {
@@ -375,7 +462,7 @@ class MongoResourceStore:
                             ],
                         },
                         {
-                            "$set": {"status": "available"},
+                            "$set": {"status": release_status},
                             "$unset": {"reservedBy": "", "reservedAt": "", "reservationKind": ""},
                         },
                     )
@@ -473,6 +560,7 @@ class MongoResourceStore:
         }
         source_claim_owner = ""
         claimed_email_id = str(incoming.sourceEmailId or "").strip()
+        claimed_email: dict[str, Any] | None = None
         source_claim_owner = f"manual-account:{uuid4()}"
         if claimed_email_id:
             document["sourceEmailId"] = claimed_email_id
@@ -496,6 +584,9 @@ class MongoResourceStore:
             )
             if int(claimed.matched_count) != 1:
                 raise DuplicateResourceError("来源邮箱不存在或正在被其他任务使用")
+            claimed_email = await self._guard(
+                self.emails.find_one({"_id": claimed_email_id})
+            )
         else:
             # A manual account without an explicit source mailbox can still
             # race an email-change target.  Claim an available matching
@@ -534,6 +625,7 @@ class MongoResourceStore:
             )
             if claimed is not None:
                 claimed_email_id = str(claimed.get("_id") or "")
+                claimed_email = claimed
                 document["sourceEmailId"] = claimed_email_id
             else:
                 existing_mailbox = await self._guard(
@@ -544,6 +636,10 @@ class MongoResourceStore:
                 )
                 if existing_mailbox is not None:
                     raise DuplicateResourceError("邮箱资源正在被其他任务使用")
+        if claimed_email is not None and claimed_email.get("sourceType") == "outlook":
+            document["emailAccessUrl"] = str(claimed_email.get("accessUrl") or document["emailAccessUrl"])
+            document["mailboxKind"] = "outlook_graph"
+            document["outlookAccountId"] = claimed_email.get("outlookAccountId")
         try:
             await self._guard(self.accounts.insert_one(document))
         except DuplicateKeyError as exc:
@@ -563,16 +659,24 @@ class MongoResourceStore:
                 )
             raise DuplicateResourceError(f"账号已存在：{incoming.email}") from exc
         if claimed_email_id:
-            await self._guard(
-                self.emails.delete_one(
-                    {
-                        "_id": claimed_email_id,
-                        "emailNormalized": document["emailNormalized"],
-                        "reservedBy": source_claim_owner,
-                        "reservationKind": "manual_account",
-                    }
+            consume_filter = {
+                "_id": claimed_email_id,
+                "emailNormalized": document["emailNormalized"],
+                "reservedBy": source_claim_owner,
+                "reservationKind": "manual_account",
+            }
+            if claimed_email is not None and claimed_email.get("sourceType") == "outlook":
+                await self._guard(
+                    self.emails.update_one(
+                        consume_filter,
+                        {
+                            "$set": {"status": "assigned", "assignedAt": utc_now()},
+                            "$unset": {"reservedBy": "", "reservedAt": "", "reservationKind": ""},
+                        },
+                    )
                 )
-            )
+            else:
+                await self._guard(self.emails.delete_one(consume_filter))
         return self._account_record(document)
 
     async def delete_accounts(self, ids: list[str]) -> DeleteResult:
@@ -1073,13 +1177,18 @@ class MongoResourceStore:
     async def list_emails(
         self, page: int, page_size: PageSize, query: str, source: str = "all"
     ) -> Page[EmailRecord]:
-        mongo_query: dict[str, Any] = {"status": "available"}
+        mongo_query: dict[str, Any] = (
+            {"status": {"$in": ["available", "reserved", "assigned", "unavailable"]}}
+            if source == "outlook"
+            else {"status": "available"}
+        )
         mongo_query.update(email_source_filter(source))
         if query.strip():
             mongo_query["emailNormalized"] = {
                 "$regex": re.escape(query.strip().lower()),
             }
-        mongo_query = await self._exclude_registered_accounts(mongo_query)
+        if source != "outlook":
+            mongo_query = await self._exclude_registered_accounts(mongo_query)
         total = await self._guard(self.emails.count_documents(mongo_query))
         cursor = (
             self.emails.find(mongo_query)
@@ -1106,6 +1215,10 @@ class MongoResourceStore:
         parent_email: str | None = None,
     ) -> bool:
         normalized_email = normalize_email(email)
+        if mailbox_kind == "outlook_graph" or source_type == "outlook":
+            # Only the Outlook service may create internal Graph handles after
+            # OAuth and Graph connectivity have both been verified.
+            return False
         registered_account = await self._guard(
             self.accounts.find_one(
                 {"emailNormalized": normalized_email},
@@ -1113,6 +1226,13 @@ class MongoResourceStore:
             )
         )
         if registered_account is not None:
+            return False
+        existing = await self._guard(
+            self.emails.find_one({"emailNormalized": normalized_email})
+        )
+        if existing and existing.get("sourceType") == "outlook":
+            # Outlook lifecycle and allocation state are exclusively managed by
+            # OutlookStore; generic email imports must not reset assignment.
             return False
         document = {
             "_id": str(uuid4()),
@@ -1163,6 +1283,7 @@ class MongoResourceStore:
             self.emails.delete_many(
                 {
                     "_id": {"$in": ids},
+                    "sourceType": {"$ne": "outlook"},
                     **non_email_change_reservation_filter(),
                 }
             )
@@ -1170,13 +1291,13 @@ class MongoResourceStore:
         return DeleteResult(deleted=int(result.deleted_count))
 
     async def emails_for_export(self, ids: list[str] | None) -> list[EmailRecord]:
-        query: dict[str, Any] = {"status": "available"}
+        query: dict[str, Any] = {"status": "available", "sourceType": {"$ne": "outlook"}}
         if ids is not None:
             query["_id"] = {"$in": ids}
         query = await self._exclude_registered_accounts(query)
         cursor = self.emails.find(query).sort("importedAt", DESCENDING)
         documents = await self._guard(cursor.to_list(length=None))
-        return [self._email_record(item) for item in documents]
+        return [self._email_record(item) for item in documents if item.get("sourceType") != "outlook"]
 
     async def reserve_emails(
         self,
@@ -1192,8 +1313,14 @@ class MongoResourceStore:
             query,
             {
                 "_id": 1,
+                "email": 1,
                 "emailNormalized": 1,
+                "accessUrl": 1,
+                "mailboxKind": 1,
+                "mailboxPassword": 1,
+                "sourceType": 1,
                 "parentEmail": 1,
+                "outlookAccountId": 1,
                 "lastAttemptAt": 1,
                 "importedAt": 1,
             },
@@ -1246,6 +1373,19 @@ class MongoResourceStore:
         return document
 
     async def release_email(self, email_id: str, run_id: str) -> None:
+        email = await self._guard(self.emails.find_one({"_id": email_id, "reservedBy": run_id}))
+        if email is None:
+            return
+        status = "available"
+        if email.get("sourceType") == "outlook":
+            outlook = await self._guard(
+                self.manager.database["outlook_accounts"].find_one(
+                    {"_id": email.get("outlookAccountId")},
+                    {"oauthStatus": 1, "graphStatus": 1},
+                )
+            )
+            if not outlook or outlook.get("oauthStatus") != "ok" or outlook.get("graphStatus") != "ok":
+                status = "unavailable"
         await self._guard(
             self.emails.update_one(
                 {
@@ -1257,39 +1397,55 @@ class MongoResourceStore:
                     ],
                 },
                 {
-                    "$set": {
-                        "status": "available",
-                        "lastAttemptAt": utc_now(),
-                    },
+                    "$set": {"status": status, "lastAttemptAt": utc_now()},
                     "$unset": {"reservedBy": "", "reservedAt": "", "reservationKind": ""},
                 },
             )
         )
 
     async def discard_reserved_email(self, email_id: str, run_id: str) -> bool:
-        result = await self._guard(
-            self.emails.delete_one(
-                {
-                    "_id": email_id,
-                    "reservedBy": run_id,
-                    "$or": [
-                        {"reservationKind": {"$exists": False}},
-                        {"reservationKind": {"$ne": "email_change"}},
-                    ],
-                }
+        reservation = {
+            "_id": email_id,
+            "reservedBy": run_id,
+            "$or": [
+                {"reservationKind": {"$exists": False}},
+                {"reservationKind": {"$ne": "email_change"}},
+            ],
+        }
+        email = await self._guard(self.emails.find_one(reservation, {"sourceType": 1}))
+        if email is None:
+            return False
+        if email.get("sourceType") == "outlook":
+            result = await self._guard(
+                self.emails.update_one(
+                    reservation,
+                    {
+                        "$set": {"status": "assigned", "assignedAt": utc_now()},
+                        "$unset": {
+                            "reservedBy": "",
+                            "reservedAt": "",
+                            "reservationKind": "",
+                        },
+                    },
+                )
             )
-        )
+            return bool(result.modified_count)
+        result = await self._guard(self.emails.delete_one(reservation))
         return bool(result.deleted_count)
 
     async def release_run_reservations(self, run_id: str) -> None:
+        reservation_kind_filter = {
+            "$or": [
+                {"reservationKind": {"$exists": False}},
+                {"reservationKind": {"$ne": "email_change"}},
+            ]
+        }
         await self._guard(
             self.emails.update_many(
                 {
                     "reservedBy": run_id,
-                    "$or": [
-                        {"reservationKind": {"$exists": False}},
-                        {"reservationKind": {"$ne": "email_change"}},
-                    ],
+                    "sourceType": {"$ne": "outlook"},
+                    **reservation_kind_filter,
                 },
                 {
                     "$set": {"status": "available"},
@@ -1297,6 +1453,43 @@ class MongoResourceStore:
                 },
             )
         )
+        outlook_query = {
+            "reservedBy": run_id,
+            "sourceType": "outlook",
+            **reservation_kind_filter,
+        }
+        outlook_reservations = await self._guard(
+            self.emails.find(outlook_query).to_list(length=None)
+        )
+        if not outlook_reservations:
+            return
+        account_ids = list(dict.fromkeys(
+            str(item.get("outlookAccountId") or "")
+            for item in outlook_reservations
+            if item.get("outlookAccountId")
+        ))
+        valid_accounts = await self._guard(
+            self.manager.database["outlook_accounts"].find(
+                {
+                    "_id": {"$in": account_ids},
+                    "oauthStatus": "ok",
+                    "graphStatus": "ok",
+                },
+                {"_id": 1},
+            ).to_list(length=len(account_ids))
+        )
+        valid_ids = {str(item["_id"]) for item in valid_accounts}
+        for email in outlook_reservations:
+            is_valid = str(email.get("outlookAccountId") or "") in valid_ids
+            await self._guard(
+                self.emails.update_one(
+                    {"_id": email["_id"], "reservedBy": run_id, **reservation_kind_filter},
+                    {
+                        "$set": {"status": "available" if is_valid else "unavailable"},
+                        "$unset": {"reservedBy": "", "reservedAt": "", "reservationKind": ""},
+                    },
+                )
+            )
 
     async def complete_mock_success(
         self,
@@ -1322,6 +1515,10 @@ class MongoResourceStore:
         if source.get("mailboxKind") == "mailcom_imap":
             document["mailboxKind"] = "mailcom_imap"
             document["mailboxPassword"] = source.get("mailboxPassword", "")
+        if source.get("sourceType") == "outlook":
+            document["mailboxKind"] = "outlook_graph"
+            document["outlookAccountId"] = source.get("outlookAccountId")
+            document["emailAccessUrl"] = str(source.get("accessUrl") or document["emailAccessUrl"])
         await self._guard(
             self.accounts.update_one(
                 {"emailNormalized": document["emailNormalized"]},
@@ -1329,18 +1526,30 @@ class MongoResourceStore:
                 upsert=True,
             )
         )
-        await self._guard(
-            self.emails.delete_one(
-                {
-                    "_id": source["_id"],
-                    "reservedBy": run_id,
-                    "$or": [
-                        {"reservationKind": {"$exists": False}},
-                        {"reservationKind": {"$ne": "email_change"}},
-                    ],
-                }
+        reservation_filter = {
+            "_id": source["_id"],
+            "reservedBy": run_id,
+            "$or": [
+                {"reservationKind": {"$exists": False}},
+                {"reservationKind": {"$ne": "email_change"}},
+            ],
+        }
+        if source.get("sourceType") == "outlook":
+            await self._guard(
+                self.emails.update_one(
+                    reservation_filter,
+                    {
+                        "$set": {"status": "assigned", "assignedAt": utc_now()},
+                        "$unset": {
+                            "reservedBy": "",
+                            "reservedAt": "",
+                            "reservationKind": "",
+                        },
+                    },
+                )
             )
-        )
+        else:
+            await self._guard(self.emails.delete_one(reservation_filter))
         stored = await self._guard(
             self.accounts.find_one({"emailNormalized": document["emailNormalized"]})
         )
@@ -1383,6 +1592,10 @@ class MongoResourceStore:
         if source.get("mailboxKind") == "mailcom_imap":
             document["mailboxKind"] = "mailcom_imap"
             document["mailboxPassword"] = source.get("mailboxPassword", "")
+        if source.get("sourceType") == "outlook":
+            document["mailboxKind"] = "outlook_graph"
+            document["outlookAccountId"] = source.get("outlookAccountId")
+            document["emailAccessUrl"] = str(source.get("accessUrl") or document["emailAccessUrl"])
         await self._guard(
             self.accounts.update_one(
                 {"emailNormalized": document["emailNormalized"]},
@@ -1390,19 +1603,31 @@ class MongoResourceStore:
                 upsert=True,
             )
         )
-        await self._guard(
-            self.emails.delete_one(
-                {
-                    "_id": source["_id"],
-                    "emailNormalized": document["emailNormalized"],
-                    "reservedBy": run_id,
-                    "$or": [
-                        {"reservationKind": {"$exists": False}},
-                        {"reservationKind": {"$ne": "email_change"}},
-                    ],
-                }
+        reservation_filter = {
+            "_id": source["_id"],
+            "emailNormalized": document["emailNormalized"],
+            "reservedBy": run_id,
+            "$or": [
+                {"reservationKind": {"$exists": False}},
+                {"reservationKind": {"$ne": "email_change"}},
+            ],
+        }
+        if source.get("sourceType") == "outlook":
+            await self._guard(
+                self.emails.update_one(
+                    reservation_filter,
+                    {
+                        "$set": {"status": "assigned", "assignedAt": utc_now()},
+                        "$unset": {
+                            "reservedBy": "",
+                            "reservedAt": "",
+                            "reservationKind": "",
+                        },
+                    },
+                )
             )
-        )
+        else:
+            await self._guard(self.emails.delete_one(reservation_filter))
         stored = await self._guard(
             self.accounts.find_one(
                 {"emailNormalized": document["emailNormalized"]}
@@ -1489,6 +1714,10 @@ class MongoResourceStore:
         if source.get("mailboxKind") == "mailcom_imap":
             document["mailboxKind"] = "mailcom_imap"
             document["mailboxPassword"] = source.get("mailboxPassword", "")
+        if source.get("sourceType") == "outlook":
+            document["mailboxKind"] = "outlook_graph"
+            document["outlookAccountId"] = source.get("outlookAccountId")
+            document["emailAccessUrl"] = str(source.get("accessUrl") or document["emailAccessUrl"])
 
         # The upsert is deliberately idempotent: retries refresh the same token
         # fields while preserving the originally-created account identity.
@@ -1542,19 +1771,31 @@ class MongoResourceStore:
 
         # Consume the reserved mailbox only after the account and token are
         # durable. A repeated call may legitimately delete zero documents.
-        await self._guard(
-            self.emails.delete_one(
-                {
-                    "_id": source["_id"],
-                    "emailNormalized": normalized_email,
-                    "reservedBy": run_id,
-                    "$or": [
-                        {"reservationKind": {"$exists": False}},
-                        {"reservationKind": {"$ne": "email_change"}},
-                    ],
-                }
+        reservation_filter = {
+            "_id": source["_id"],
+            "emailNormalized": normalized_email,
+            "reservedBy": run_id,
+            "$or": [
+                {"reservationKind": {"$exists": False}},
+                {"reservationKind": {"$ne": "email_change"}},
+            ],
+        }
+        if source.get("sourceType") == "outlook":
+            await self._guard(
+                self.emails.update_one(
+                    reservation_filter,
+                    {
+                        "$set": {"status": "assigned", "assignedAt": utc_now()},
+                        "$unset": {
+                            "reservedBy": "",
+                            "reservedAt": "",
+                            "reservationKind": "",
+                        },
+                    },
+                )
             )
-        )
+        else:
+            await self._guard(self.emails.delete_one(reservation_filter))
         stored = await self._guard(
             self.accounts.find_one({"emailNormalized": normalized_email})
         )
@@ -1951,6 +2192,9 @@ class MongoResourceStore:
         available_alias_query = await self._exclude_registered_accounts(
             registration_email_filter("mailcom_alias")
         )
+        available_outlook_query = await self._exclude_registered_accounts(
+            registration_email_filter("outlook")
+        )
         (
             accounts_total,
             accounts_today,
@@ -1961,6 +2205,7 @@ class MongoResourceStore:
             free_eligible,
             emails_available,
             email_aliases,
+            emails_outlook,
             proxies_total,
             proxies_enabled,
             proxies_available,
@@ -1981,6 +2226,7 @@ class MongoResourceStore:
             ),
             self._guard(self.emails.count_documents(available_email_query)),
             self._guard(self.emails.count_documents(available_alias_query)),
+            self._guard(self.emails.count_documents(available_outlook_query)),
             self._guard(self.proxies.count_documents({})),
             self._guard(self.proxies.count_documents({"enabled": True})),
             self._guard(self.proxies.count_documents({"status": "available"})),
@@ -2002,7 +2248,7 @@ class MongoResourceStore:
                     ineligible=free_total - free_eligible,
                 ),
             ),
-            emails=EmailStats(available=emails_available, aliases=email_aliases),
+            emails=EmailStats(available=emails_available, aliases=email_aliases, outlook=emails_outlook),
             proxies=ProxyStats(
                 total=proxies_total,
                 enabled=proxies_enabled,
@@ -2034,6 +2280,7 @@ class MongoResourceStore:
             accountType=document["accountType"],
             phoneBound=document.get("phoneBound"),
             promotionEligible=derived_eligible,
+            outlookAccountId=(str(document.get("outlookAccountId") or "") or None),
             accessTokenConfigured=bool(document.get("accessTokenConfigured", False)),
             accessTokenExpiresAt=document.get("accessTokenExpiresAt"),
             accessTokenUpdatedAt=document.get("accessTokenUpdatedAt"),
@@ -2083,14 +2330,18 @@ class MongoResourceStore:
             accessUrl=direct_mailbox_access_url(
                 document["accessUrl"], document["email"]
             ),
-            importedAt=document["importedAt"],
+            importedAt=document.get("importedAt") or document.get("createdAt") or utc_now(),
             sourceType=(
-                "mailcom_alias"
-                if document.get("sourceType") == "mailcom_alias"
+                "outlook" if document.get("sourceType") == "outlook"
+                else "mailcom_alias" if document.get("sourceType") == "mailcom_alias"
                 else "manual"
             ),
-            parentEmail=(
-                str(document.get("parentEmail") or "") or None
+            parentEmail=(str(document.get("parentEmail") or "") or None),
+            outlookAccountId=(str(document.get("outlookAccountId") or "") or None),
+            assignmentStatus=(
+                str(document.get("status"))
+                if document.get("status") in {"available", "reserved", "assigned", "unavailable"}
+                else "available"
             ),
         )
 

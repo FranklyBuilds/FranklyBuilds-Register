@@ -31,7 +31,7 @@ function emptyStats(): OverviewStats {
       plus: { total: 0, bound: 0, unbound: 0 },
       free: { total: 0, eligible: 0, ineligible: 0 },
     },
-    emails: { available: 0, aliases: 0 },
+    emails: { available: 0, aliases: 0, outlook: 0},
     proxies: { total: 0, enabled: 0, available: 0, quarantined: 0 },
   }
 }

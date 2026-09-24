@@ -22,8 +22,8 @@ AccountExportFormat = Literal[
 ProxyStatus = Literal["available", "unknown", "quarantined"]
 ProxyScheme = Literal["http", "https", "socks5", "socks5h"]
 ProxySubscriptionProvider = Literal["easy-proxies", "resin"]
-EmailSource = Literal["all", "standard", "mailcom_alias"]
-EmailSourceType = Literal["manual", "mailcom_alias"]
+EmailSource = Literal["all", "standard", "mailcom_alias", "outlook"]
+EmailSourceType = Literal["manual", "mailcom_alias", "outlook"]
 RunStatus = Literal[
     "idle",
     "queued",
@@ -81,6 +81,7 @@ class AccountRecord(ApiModel):
     chatgptPassword: str
     totpSecret: str
     emailAccessUrl: str
+    outlookAccountId: str | None = None
     createdAt: datetime
     accountType: AccountType
     phoneBound: bool | None = None
@@ -151,6 +152,8 @@ class EmailRecord(ApiModel):
     importedAt: datetime
     sourceType: EmailSourceType = "manual"
     parentEmail: str | None = None
+    outlookAccountId: str | None = None
+    assignmentStatus: Literal["available", "reserved", "assigned", "unavailable"] = "available"
 
 
 class ProxyRecord(ApiModel):
@@ -454,6 +457,7 @@ class AccountStats(ApiModel):
 class EmailStats(ApiModel):
     available: int = 0
     aliases: int = 0
+    outlook: int = 0
 
 
 class ProxyStats(ApiModel):

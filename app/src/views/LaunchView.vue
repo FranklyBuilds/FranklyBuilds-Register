@@ -45,7 +45,7 @@ const selectedGroup = ref((() => {
 const selectedEmailSource = ref<EmailSource>((() => {
   try {
     const saved = localStorage.getItem('autoregister.emailSource')
-    return saved === 'standard' || saved === 'mailcom_alias' ? saved : 'all'
+    return saved === 'standard' || saved === 'mailcom_alias' || saved === 'outlook' ? saved : 'all'
   } catch {
     return 'all'
   }
@@ -55,8 +55,9 @@ const logViewport = ref<HTMLElement>()
 
 const availableForSource = computed(() => {
   if (selectedEmailSource.value === 'mailcom_alias') return store.stats.emails.aliases
+  if (selectedEmailSource.value === 'outlook') return store.stats.emails.outlook
   if (selectedEmailSource.value === 'standard') {
-    return Math.max(0, store.stats.emails.available - store.stats.emails.aliases)
+    return Math.max(0, store.stats.emails.available - store.stats.emails.aliases - store.stats.emails.outlook)
   }
   return store.stats.emails.available
 })
@@ -419,7 +420,7 @@ function downloadLogs() {
       <article class="panel metric-card metric-card--mail">
         <div class="metric-title"><span>当前可用邮箱</span><el-icon><Message /></el-icon></div>
         <strong>{{ store.stats.emails.available }}</strong>
-        <p>其中分裂邮箱 {{ store.stats.emails.aliases }} 个</p>
+        <p>其中分裂邮箱 {{ store.stats.emails.aliases }} 个 · Outlook {{ store.stats.emails.outlook }} 个</p>
       </article>
 
       <article class="panel metric-card metric-card--plus">
@@ -465,6 +466,7 @@ function downloadLogs() {
               <el-option label="全部邮箱" value="all" />
               <el-option label="仅普通邮箱" value="standard" />
               <el-option label="仅分裂邮箱" value="mailcom_alias" />
+              <el-option label="仅 Outlook 邮箱" value="outlook" />
             </el-select>
             <el-button :icon="Refresh" :loading="syncingAliases" :disabled="running" @click="syncAliases">
               同步分裂邮箱
@@ -512,7 +514,7 @@ function downloadLogs() {
           />
           <div class="run-hints">
             <span>当前来源可用 {{ availableForSource }}</span>
-            <span>邮箱来源 {{ selectedEmailSource === 'mailcom_alias' ? '分裂邮箱' : selectedEmailSource === 'standard' ? '普通邮箱' : '全部' }}</span>
+            <span>邮箱来源 {{ selectedEmailSource === 'mailcom_alias' ? '分裂邮箱' : selectedEmailSource === 'standard' ? '普通邮箱' : selectedEmailSource === 'outlook' ? 'Outlook 邮箱' : '全部' }}</span>
             <span>并发 {{ store.settings.concurrency }}</span>
             <span>方式 {{ registrationModeLabel }}</span>
             <span>注册国家 {{ selectedCountry ? countryLabel(selectedCountry) : '未选择' }}</span>

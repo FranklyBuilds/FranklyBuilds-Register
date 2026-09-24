@@ -163,6 +163,8 @@ class MongoEmailChangeStore:
             "targetEmail": str(target.get("email") or target_normalized),
             "targetEmailNormalized": target_normalized,
             "targetEmailAccessUrl": str(target.get("accessUrl") or ""),
+            "targetMailboxKind": str(target.get("mailboxKind") or "url"),
+            "targetOutlookAccountId": str(target.get("outlookAccountId") or ""),
             "reservationOwner": owner,
             "stage": "target_reserved",
             "attempts": 0,
@@ -553,6 +555,8 @@ class MongoEmailChangeStore:
                         run.get("targetEmailNormalized") or run.get("targetEmail")
                     ),
                     "accessUrl": str(run.get("targetEmailAccessUrl") or ""),
+                    "mailboxKind": str(run.get("targetMailboxKind") or "url"),
+                    "outlookAccountId": str(run.get("targetOutlookAccountId") or "") or None,
                     "_already_consumed": True,
                 }
                 return dict(account), target
@@ -657,15 +661,29 @@ class MongoEmailChangeStore:
                 or bool(current.get("remoteUncertain"))
             ):
                 return False
+        query = {
+            "_id": str(run.get("targetEmailId") or ""),
+            "reservedBy": str(run.get("reservationOwner") or ""),
+            "reservationKind": "email_change",
+        }
+        target = await self._guard(self.emails.find_one(query, {"sourceType": 1, "outlookAccountId": 1}))
+        if target is None:
+            return False
+        release_status = "available"
+        if target.get("sourceType") == "outlook":
+            outlook = await self._guard(
+                self.manager.database["outlook_accounts"].find_one(
+                    {"_id": target.get("outlookAccountId")},
+                    {"oauthStatus": 1, "graphStatus": 1},
+                )
+            )
+            if not outlook or outlook.get("oauthStatus") != "ok" or outlook.get("graphStatus") != "ok":
+                release_status = "unavailable"
         result = await self._guard(
             self.emails.update_one(
+                query,
                 {
-                    "_id": str(run.get("targetEmailId") or ""),
-                    "reservedBy": str(run.get("reservationOwner") or ""),
-                    "reservationKind": "email_change",
-                },
-                {
-                    "$set": {"status": "available", "lastAttemptAt": _now()},
+                    "$set": {"status": release_status, "lastAttemptAt": _now()},
                     "$unset": {"reservedBy": "", "reservedAt": "", "reservationKind": ""},
                 },
             )
@@ -673,15 +691,26 @@ class MongoEmailChangeStore:
         return int(result.modified_count) > 0
 
     async def consume_target(self, run: dict[str, Any]) -> bool:
-        result = await self._guard(
-            self.emails.delete_one(
-                {
-                    "_id": str(run.get("targetEmailId") or ""),
-                    "reservedBy": str(run.get("reservationOwner") or ""),
-                    "reservationKind": "email_change",
-                }
+        query = {
+            "_id": str(run.get("targetEmailId") or ""),
+            "reservedBy": str(run.get("reservationOwner") or ""),
+            "reservationKind": "email_change",
+        }
+        target = await self._guard(self.emails.find_one(query, {"sourceType": 1}))
+        if target is None:
+            return False
+        if target.get("sourceType") == "outlook":
+            result = await self._guard(
+                self.emails.update_one(
+                    query,
+                    {
+                        "$set": {"status": "assigned", "assignedAt": _now()},
+                        "$unset": {"reservedBy": "", "reservedAt": "", "reservationKind": ""},
+                    },
+                )
             )
-        )
+            return int(result.modified_count) > 0
+        result = await self._guard(self.emails.delete_one(query))
         return int(result.deleted_count) > 0
 
     async def clear_account_marker(self, run: dict[str, Any]) -> bool:
@@ -716,6 +745,9 @@ class MongoEmailChangeStore:
         set_values["mailboxKind"] = target_mailbox_kind
         if target_mailbox_kind == "mailcom_imap" and target.get("mailboxPassword"):
             set_values["mailboxPassword"] = target["mailboxPassword"]
+        if target_mailbox_kind == "outlook_graph":
+            set_values["outlookAccountId"] = str(target.get("outlookAccountId") or "")
+            set_values["emailAccessUrl"] = f"outlook://{set_values['outlookAccountId']}"
         updates = dict(getattr(remote, "account_updates", {}) or {})
         if updates.get("authSession"):
             set_values["authSession"] = updates["authSession"]
@@ -745,6 +777,8 @@ class MongoEmailChangeStore:
                 unset_values["refreshToken"] = ""
             if target_mailbox_kind != "mailcom_imap":
                 unset_values["mailboxPassword"] = ""
+            if target_mailbox_kind != "outlook_graph":
+                unset_values["outlookAccountId"] = ""
             result = await self._guard(
                 self.accounts.update_one(
                     {

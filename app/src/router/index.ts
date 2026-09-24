@@ -65,7 +65,7 @@ const router = createRouter({
       path: '/outlook-register',
       name: 'outlook-register',
       component: () => import('@/views/OutlookRegisterView.vue'),
-      meta: { title: 'Outlook 注册' },
+      meta: { title: 'Outlook 账号管理' },
     },
     {
       path: '/:pathMatch(.*)*',

@@ -88,7 +88,7 @@ onBeforeUnmount(() => {
         </el-menu-item>
         <el-menu-item index="/outlook-register">
           <el-icon><Promotion /></el-icon>
-          <template #title>Outlook 注册</template>
+          <template #title>Outlook 账号</template>
         </el-menu-item>
       </el-menu>
 
