@@ -42,8 +42,8 @@
 
 - 未执行真实 Microsoft OAuth/Graph 请求、真实 MongoDB 迁移和 Windows 启停脚本端到端验证；对应流程由 mock/单元测试覆盖。
 - 生产构建提示主 JS chunk 超过 500 kB；本任务未做无关的代码分包改造。
-- 已在当前任务分支创建实现 commit；未创建 PR（本任务未要求合并）。
+- 已创建实现 commit，并创建 PR #3：https://github.com/FranklyBuilds/FranklyBuilds-Register/pull/3。
 
 ## 下一步唯一动作
 
-若要合并到主分支，再为该 commit 创建 Pull Request。
+等待 PR #3 检查与合并。
