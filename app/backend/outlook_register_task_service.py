@@ -702,7 +702,7 @@ class OutlookRegisterTaskService:
                 if (self._thread and self._thread.is_alive()) or (self._async_task and not self._async_task.done()):
                     raise RuntimeError("Outlook 注册任务运行中，先停止任务")
             config = await self._internal_config()
-            await self.resources._guard(self.task_collection.update_one({"_id": TASK_ID}, {"$set": {"status": "idle", "stats": _empty_stats(config), "failureStats": {}, "error": None, "startedAt": None, "finishedAt": None, "updatedAt": utc_now()}}, upsert=True))
+            await self.resources._guard(self.task_collection.update_one({"_id": TASK_ID}, {"$set": {"status": "idle", "stats": _empty_stats(config), "failureStats": {}, "error": None, "startedAt": None, "finishedAt": None, "proxyGroup": "", "proxyCount": 0, "updatedAt": utc_now()}}, upsert=True))
             await self.resources._guard(self.log_collection.delete_many({"taskId": TASK_ID}))
             return await self.status()
 

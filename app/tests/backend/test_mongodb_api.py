@@ -694,6 +694,33 @@ def test_outlook_task_sync_adapter_finalizes_without_self_deadlock() -> None:
     asyncio.run(scenario())
 
 
+def test_outlook_task_reset_clears_stale_proxy_metadata() -> None:
+    from backend.outlook_register_task_service import OutlookRegisterTaskService
+
+    manager = _OutlookFakeManager()
+    service = OutlookRegisterTaskService(MongoResourceStore(manager), adapter=lambda config, control: {"status": "completed"})
+
+    async def scenario() -> None:
+        await service.ensure_indexes()
+        await manager.database["outlook_register_tasks"].update_one(
+            {"_id": "outlook-register"},
+            {"$set": {
+                "status": "completed",
+                "stats": {"status": "completed"},
+                "failureStats": {},
+                "proxyGroup": "stale-group",
+                "proxyCount": 3,
+            }},
+            upsert=True,
+        )
+        state = await service.reset()
+        assert state["status"] == "idle"
+        assert state["proxyGroup"] == ""
+        assert state["proxyCount"] == 0
+
+    asyncio.run(scenario())
+
+
 def test_outlook_task_stop_keeps_terminal_ownership_until_worker_exits() -> None:
     from backend.outlook_register_task_service import OutlookRegisterTaskService
 
