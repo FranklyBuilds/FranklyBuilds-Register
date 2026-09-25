@@ -16,34 +16,13 @@ function Stop-SavedProcess([string] $Name) {
     Remove-Item -LiteralPath $pidFile -Force -ErrorAction SilentlyContinue
 }
 
-function Stop-PortOwner([int] $Port) {
-    $listeners = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
-    foreach ($listener in $listeners) {
-        Stop-Process -Id $listener.OwningProcess -Force -ErrorAction SilentlyContinue
-    }
-}
-
 Write-Host '[FB注册机] stopping project services...' -ForegroundColor Cyan
-
-$mailComStop = Join-Path $Root 'mailcom-manager\stop.ps1'
-if (Test-Path -LiteralPath $mailComStop) {
-    & $mailComStop
-}
 
 foreach ($name in @('frontend', 'backend', 'easy-proxies', 'resin')) {
     Stop-SavedProcess $name
 }
-foreach ($port in @(5173, 8000, 9091, 2260, 3211, 18796, 18098)) {
-    Stop-PortOwner $port
-}
-
-# These executables are integrated components and can survive after their
-# listener closes, so clean them up explicitly.
-Stop-Process -Name 'easy_proxies', 'resin' -Force -ErrorAction SilentlyContinue
-
 if (-not $KeepRoxy) {
     Stop-SavedProcess 'roxy-browser'
-    Stop-Process -Name 'RoxyBrowser' -Force -ErrorAction SilentlyContinue
 }
 
-Write-Host 'FranklyBuilds-Register (FB注册机) stopped.' -ForegroundColor Green
+Write-Host 'FranklyBuilds-Register owned processes stopped. Untracked listeners and legacy services were left untouched.' -ForegroundColor Green

@@ -20,11 +20,14 @@ const search = ref('')
 const migration = ref<Record<string, unknown> | null>(null)
 const resultRows = ref<Array<{ email: string; oauthStatus: string; graphStatus: string; createdAt: string }>>([])
 const proxyTotal = ref(0)
+const registerLogs = ref<Array<{ createdAt: string; level: string; line: string }>>([])
+const registerAction = ref(false)
+const registerConfig = ref<Record<string, any>>({})
 
 const proxyGroupCount = computed(() => proxyGroups.value.length)
 const registrationSummary = computed(() => {
   const stats = registerStatus.value?.stats || {}
-  return `GPT 主任务：${stats.status || 'idle'} · 完成 ${stats.submitted || 0} · 成功 ${stats.succeeded || 0} · 失败 ${stats.failed || 0}`
+  return `Outlook 独立任务：${registerStatus.value?.status || stats.status || 'idle'} · 提交 ${stats.submitted || 0} · 成功 ${stats.succeeded || 0} · 失败 ${stats.failed || 0}`
 })
 
 function statusType(value: string) {
@@ -52,6 +55,8 @@ async function refresh() {
     proxyTotal.value = proxyPage.total
     proxyGroups.value = groups
     registerStatus.value = status
+    registerConfig.value = status.config || {}
+    registerLogs.value = (await outlookGateway.registerLogs()).items
     if (selected.value) selected.value = rows.value.find((item) => item.id === selected.value?.id) || null
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : 'Outlook 数据读取失败')
@@ -84,6 +89,30 @@ async function showMessage(row: OutlookMessage) {
 
 function escapeHtml(value: string) {
   return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char] || char)
+}
+
+
+async function runRegisterAction(action: 'start' | 'stop' | 'reset') {
+  registerAction.value = true
+  try {
+    const result = action === 'start' ? await outlookGateway.startRegister() : action === 'stop' ? await outlookGateway.stopRegister() : await outlookGateway.resetRegister()
+    registerStatus.value = result
+    registerConfig.value = result.config || registerConfig.value
+    registerLogs.value = (await outlookGateway.registerLogs()).items
+    ElMessage.success(action === 'start' ? 'Outlook 任务已启动' : action === 'stop' ? 'Outlook 任务已停止' : 'Outlook 任务已重置')
+  } catch (error) { ElMessage.error(error instanceof Error ? error.message : '任务操作失败') }
+  finally { registerAction.value = false }
+}
+
+async function saveRegisterConfig() {
+  registerAction.value = true
+  try {
+    const result = await outlookGateway.updateRegisterConfig(registerConfig.value)
+    registerConfig.value = result.config
+    ElMessage.success('Outlook 注册任务配置已保存')
+    await refresh()
+  } catch (error) { ElMessage.error(error instanceof Error ? error.message : '配置保存失败') }
+  finally { registerAction.value = false }
 }
 
 async function importAccounts() {
@@ -175,8 +204,28 @@ onMounted(() => void refresh())
     </div>
 
     <el-alert type="info" :closable="false" show-icon :title="migration ? `迁移：新增 ${migration.imported ?? 0} · 重复 ${migration.duplicates ?? 0} · 错误 ${migration.errors ?? 0}；原文件保留只读备份` : '旧 Outlook 文件将在主服务启动时按邮箱幂等迁移；未经 OAuth 与 Graph 验证不会发布。'">
-      <template #default><div class="migration"><span>GPT 任务共用状态：{{ registrationSummary }}</span><el-button size="small" @click="migrateLegacy">重复执行迁移</el-button></div></template>
+      <template #default><div class="migration"><span>{{ registrationSummary }} · 代理组 {{ registerStatus?.proxyGroup || '默认组' }} · 可用代理 {{ registerStatus?.proxyCount || 0 }}</span><el-button size="small" @click="migrateLegacy">重复执行迁移</el-button></div></template>
     </el-alert>
+
+    <el-card shadow="never">
+      <template #header><div class="card-header"><strong>Outlook 注册任务</strong><span class="muted">独立于 GPT 任务，状态、日志和失败统计持久化到 MongoDB</span></div></template>
+      <div class="task-actions">
+        <el-button type="primary" :loading="registerAction" :disabled="registerStatus?.enabled" @click="runRegisterAction('start')">启动</el-button>
+        <el-button :loading="registerAction" :disabled="!registerStatus?.enabled" @click="runRegisterAction('stop')">停止</el-button>
+        <el-button :loading="registerAction" @click="runRegisterAction('reset')">重置</el-button>
+        <span class="muted">状态：{{ registerStatus?.status || 'idle' }} · 日志 {{ registerStatus?.log_count || 0 }} 条</span>
+      </div>
+      <el-form inline label-width="90px" class="task-config">
+        <el-form-item label="任务数"><el-input-number v-model="registerConfig.tasks" :min="1" :max="100000" /></el-form-item>
+        <el-form-item label="并发"><el-input-number v-model="registerConfig.concurrent_flows" :min="1" :max="64" /></el-form-item>
+        <el-form-item label="无头"><el-switch v-model="registerConfig.headless" /></el-form-item>
+        <el-form-item label="代理分组"><el-input v-model="registerConfig.proxy.group" placeholder="默认组" /></el-form-item>
+        <el-form-item><el-button type="success" :loading="registerAction" @click="saveRegisterConfig">保存配置</el-button></el-form-item>
+      </el-form>
+      <el-table :data="registerLogs" size="small" max-height="180" empty-text="暂无任务日志">
+        <el-table-column prop="createdAt" label="时间" width="220" /><el-table-column prop="level" label="级别" width="90" /><el-table-column prop="line" label="日志" min-width="360" show-overflow-tooltip />
+      </el-table>
+    </el-card>
 
     <el-card shadow="never">
       <template #header><div class="card-header"><strong>导入 Outlook 账号</strong><span class="muted">每行 email----password----client_id----refresh_token</span></div></template>
@@ -255,6 +304,7 @@ onMounted(() => void refresh())
 .filters :deep(.el-input) { width: min(360px, 70vw); }
 .filters :deep(.el-select) { width: 210px; }
 .form-actions { justify-content: flex-start; margin-top: 12px; }
+.task-actions, .task-config { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
 .proxy-table { margin-top: 12px; }
 .muted { color: var(--el-text-color-secondary); font-size: 12px; }
 </style>

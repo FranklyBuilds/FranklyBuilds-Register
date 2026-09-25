@@ -140,16 +140,14 @@ flowchart LR
     API --> MAIL["Mailbox providers"]
     API --> PAY["Payment workers"]
     API --> SMS["SMS providers"]
-    HUB["MailCom Hub"] --> IMAP["mail.com IMAP"]
-    API --> HUB
+    API --> IMAP["mail.com IMAP"]
 ```
 
 所有服务默认绑定回环地址：
 
-- 前端：<http://127.0.0.1:5173>
-- 后端（含 Outlook 管理、OAuth 与 Graph 邮箱）：<http://127.0.0.1:8000>
+- 统一控制台与后端：<http://127.0.0.1:8000/launch>
 - API 文档：<http://127.0.0.1:8000/api/docs>
-- MailCom Hub：<http://127.0.0.1:3211>
+- 开发前端（仅 `-Development`）：<http://127.0.0.1:5173>
 - RoxyBrowser OpenAPI：`127.0.0.1:50000`
 
 ## 环境要求
@@ -172,21 +170,23 @@ Copy-Item .env.example .env
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1
 ```
 
-分别启动后端和前端：
+日常使用通过根目录统一入口启动：
 
 ```powershell
-# 终端 1
-cd app
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-mongodb.ps1
-& ..\register_env\Scripts\python.exe -m backend
-
-# 终端 2
-cd app
-npm.cmd run dev
+cd <仓库根目录>
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\start-autoregister.ps1 -NoBrowser
+# 控制台：http://127.0.0.1:8000/launch
 ```
 
-打开 <http://127.0.0.1:5173/launch>。也可以在仓库根目录双击
-`start-autoregister.cmd` 启动本机组件。
+默认模式由 FastAPI 托管已构建的 Vue 控制台，不启动独立 MailCom 管理器或旧 Outlook 服务。
+开发时可显式保留 Vite：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\start-autoregister.ps1 -Development
+# 开发控制台：http://127.0.0.1:5173/launch
+```
+
+停止使用 `stop-autoregister.ps1`。首次部署或构建前端时，先运行 `cd app; npm.cmd run build-only`。
 
 在配置栏打开“注册时设置 2FA”后，浏览器注册和协议注册都会在账号创建完成后
 执行 TOTP 重认证、激活认证器并把 Secret 保存到账号记录；“注册时设置密码”可
@@ -230,25 +230,21 @@ HTTP(S)/SOCKS 及 `socks5h` 节点；Roxy 使用原生代理字段。设置为 `
 敏感数据保存在本机 MongoDB 或 `data/` 下的本地文件中。API 响应和任务日志会尽量
 隐藏 Access Token、代理密码、短信 Key、TOTP Secret 和浏览器连接地址。
 
-## MailCom Hub
+## MailCom 集成
 
-`mailcom-manager/` 是独立的本机邮箱管理服务，提供：
+MailCom 账号、别名、IMAP、验证码读取和服务器推送现在由主 FastAPI 服务管理，数据保存于主 MongoDB。控制台入口为 `/mailcom`，接口位于 `/api/mailcom/*`；普通列表和日志不会返回密码或 DPAPI 密文。
 
-- `邮箱----密码` 批量导入
-- Windows DPAPI 加密存储
-- INBOX、Spam、Junk 读取和验证码提取
-- 主邮箱与别名独立接码 URL
-- 别名创建和批量补足
-- 可选的服务器快照同步
-
-启动：
+迁移旧 SQLite：
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\mailcom-manager\start.ps1
+cd <仓库根目录>
+# 启动主服务后，在 MailCom 页面点击“迁移”，或调用：
+Invoke-WebRequest http://127.0.0.1:8000/api/mailcom/migrate -Method Post
 ```
 
-接口文档见 <http://127.0.0.1:3211/docs>，详细说明见
-[`mailcom-manager/README.md`](mailcom-manager/README.md)。
+迁移会在旧数据库旁创建只读备份，从备份副本读取，解密旧 DPAPI 凭据后以主服务前缀重新保护；重复执行按规范化邮箱和别名幂等，不覆盖 Mongo 中已有记录，也不修改原 SQLite。验证计数和 IMAP 连通性后，旧 `mailcom-manager/` 仅作为迁移与回滚材料保留，不作为运行时服务。回滚时停止主服务，保留 Mongo 数据和只读备份，并按部署记录恢复旧管理器；不要删除原 SQLite。
+
+旧的 `3211` 邮箱 URL 仅为迁移/回滚兼容格式。新同步数据使用 `mailcom://account/<id>` 或 `mailcom://alias/<id>` 内部句柄，主流水线不会请求旧端口。
 
 ## 环境变量
 
@@ -312,7 +308,7 @@ MongoDB 集成测试默认跳过；需要时设置 `AUTOREGISTER_RUN_MONGO_TESTS
 │  ├─ tests/backend/        后端测试
 │  ├─ scripts/              MongoDB、发布与安装包静态分析脚本
 │  └─ .env.example          环境变量模板
-├─ mailcom-manager/         MailCom Hub
+├─ mailcom-manager/         MailCom 迁移与回滚来源（legacy）
 ├─ start-autoregister.ps1   Windows 一键启动
 └─ README.md
 ```

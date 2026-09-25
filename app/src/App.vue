@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { CircleCheck, Collection, Connection, CreditCard, Message, Operation, Setting, Fold, Expand, Monitor, VideoPlay, Promotion } from '@element-plus/icons-vue'
+import { CircleCheck, Collection, Connection, CreditCard, Message, Operation, Setting, Fold, Expand, Monitor, VideoPlay, Promotion, Link } from '@element-plus/icons-vue'
 import { useAppStore } from '@/stores/app'
 
 const route = useRoute()
@@ -89,6 +89,10 @@ onBeforeUnmount(() => {
         <el-menu-item index="/outlook-register">
           <el-icon><Promotion /></el-icon>
           <template #title>Outlook 账号</template>
+        </el-menu-item>
+        <el-menu-item index="/mailcom">
+          <el-icon><Link /></el-icon>
+          <template #title>MailCom 管理</template>
         </el-menu-item>
       </el-menu>
 

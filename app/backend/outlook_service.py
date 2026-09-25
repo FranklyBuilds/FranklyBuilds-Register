@@ -757,27 +757,46 @@ class OutlookService:
             return await request.app.state.outlook_store.list_accounts(page=page, page_size=page_size, query=q, source=source, pool_status=pool_status)
 
         @router.get("/api/outlook/register")
-        async def get_legacy_register_status(request: Request):
+        async def get_register_status(request: Request):
             request.app.state.mongo_manager.require_online()
-            from .run_store import MongoRunStore
-            from .run_manager import ACTIVE_RUN_STATUSES
+            return await request.app.state.outlook_register_tasks.status()
 
-            store = MongoRunStore(request.app.state.mongo_manager)
-            active = await store.active()
-            state = active.model_dump(mode="json", by_alias=True) if active else None
-            return {
-                "enabled": bool(active and active.status in ACTIVE_RUN_STATUSES),
-                "config": {},
-                "stats": {
-                    "status": state.get("status") if state else "idle",
-                    "submitted": int(state.get("processed", 0)) if state else 0,
-                    "succeeded": int(state.get("succeeded", 0)) if state else 0,
-                    "failed": int(state.get("failed", 0)) if state else 0,
-                    "running": int(state.get("activeWorkers", 0)) if state else 0,
-                },
-                "failure_stats": {},
-                "result_count": await request.app.state.outlook_store.accounts.count_documents({}),
-            }
+        @router.put("/api/outlook/register")
+        async def update_register_config(request: Request):
+            request.app.state.mongo_manager.require_online()
+            try:
+                payload = await request.json()
+                if not isinstance(payload, dict):
+                    raise ValueError("配置必须是 JSON 对象")
+                return {"config": await request.app.state.outlook_register_tasks.update_config(payload)}
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=422, detail={"code": "outlook_register_config_invalid", "message": str(exc)}) from exc
+
+        @router.post("/api/outlook/register/start", status_code=202)
+        async def start_register_task(request: Request):
+            request.app.state.mongo_manager.require_online()
+            try:
+                return await request.app.state.outlook_register_tasks.start()
+            except (TypeError, ValueError, RuntimeError) as exc:
+                raise HTTPException(status_code=409, detail={"code": "outlook_register_start_failed", "message": str(exc)}) from exc
+
+        @router.post("/api/outlook/register/stop", status_code=202)
+        async def stop_register_task(request: Request):
+            request.app.state.mongo_manager.require_online()
+            return await request.app.state.outlook_register_tasks.stop()
+
+        @router.post("/api/outlook/register/reset")
+        async def reset_register_task(request: Request):
+            request.app.state.mongo_manager.require_online()
+            try:
+                return await request.app.state.outlook_register_tasks.reset()
+            except RuntimeError as exc:
+                raise HTTPException(status_code=409, detail={"code": "outlook_register_reset_failed", "message": str(exc)}) from exc
+
+        @router.get("/api/outlook/register/logs")
+        async def get_register_logs(request: Request, limit: int = Query(200, ge=1, le=500)):
+            request.app.state.mongo_manager.require_online()
+            return {"items": await request.app.state.outlook_register_tasks.logs(limit)}
 
         @router.get("/api/outlook/proxy-groups")
         async def list_shared_proxy_groups(request: Request):
@@ -1075,6 +1094,9 @@ class MongoOutlookMailboxClient(MailboxClient):
 
     async def get_snapshot(self, access_url: str, email: str, *, purpose: str = "verification") -> MailboxSnapshot:
         parsed = urlsplit(access_url)
+        if parsed.scheme.casefold() == "mailcom":
+            from .mailcom_service import MongoMailComMailboxClient
+            return await MongoMailComMailboxClient(self.manager).get_snapshot(access_url, email, purpose=purpose)
         if parsed.scheme.casefold() != "outlook":
             return await super().get_snapshot(access_url, email, purpose=purpose)
         account_id = parsed.netloc or parsed.path.lstrip("/")
