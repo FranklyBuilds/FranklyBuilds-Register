@@ -4,6 +4,9 @@
   Outlook / Hotmail 自动注册，并获取 Microsoft Graph OAuth2 <code>refresh_token</code>（基于 patchright 浏览器自动化）。
 </p>
 
+
+> **Register 主服务集成说明（当前推荐入口）**：本目录是 Outlook 浏览器执行引擎和历史 CLI 的兼容实现。日常运行请从仓库根目录执行 `start-autoregister.ps1`，使用 `http://127.0.0.1:8000/outlook-register`。主服务通过 `result_sink` 将注册结果写入 MongoDB，不把 `Results/` 文件作为运行时数据源；本文件中关于 `Results/` 的说明仅适用于直接运行旧 CLI 的兼容模式。
+
 <p align="center">
   <a href="./README.md">English</a> ·
   <a href="./README.zh-CN.md"><b>简体中文</b></a> ·
@@ -20,7 +23,7 @@
 ## 配套项目
 
 - **[Easy Proxies](https://github.com/daimon3332/easy-proxies)（强烈推荐搭配使用！！！！！！）— 多端口模式必需。** 当 `proxy.mode` 设为 `multiple` 时，为 OutlookRegister 提供本地代理池；使用该模式前请先启动并配置 Easy Proxies。
-- **[OutlookManage](https://github.com/daimon3332/OutlookManage) — 账号管理。** 用于导入和管理已注册的 Outlook 账号及其 OAuth2 凭据。
+- **Outlook 账号管理（主服务）**：已迁入 Register 控制台 `/outlook-register` 和主 MongoDB；`OutlookManage` 仅作为历史兼容参考。
 - **[Outlook OAuth GetToken](https://github.com/daimon3332/Outlook-Oauth-GetToken) — 单独获取令牌。** 无需运行注册流程，即可为已有微软邮箱获取 OAuth2 `refresh_token`。
 
 > 本项目基于 **[LainsNL/OutlookRegister](https://github.com/LainsNL/OutlookRegister)** 二开。  
@@ -104,7 +107,7 @@ python server.py
 python main.py
 ```
 
-成功账号会**追加**写入 `Results/oauth2.txt`：
+直接运行旧 CLI 时，成功账号仍会**追加**写入 `Results/oauth2.txt`；通过 Register 主服务运行时不会写该文件，结果进入 MongoDB：
 
 ```text
 邮箱----密码----client_id----refresh_token
@@ -190,7 +193,8 @@ python main.py
   ->（可选）绑定辅助邮箱
   -> 进入 Outlook 邮箱
   -> OAuth2（优先 cookie，失败再新浏览器并可注入 cookie）
-  -> 将 refresh_token 追加写入 Results/oauth2.txt
+  -> 主服务模式：将账号与 refresh_token 写入 MongoDB
+  -> 旧 CLI 模式：将 refresh_token 追加写入 Results/oauth2.txt
 ```
 
 OAuth 可处理：个人/工作帐户选择、保护帐户、验证电子邮件、保持登录「否」、同意授权与 code 捕获等。

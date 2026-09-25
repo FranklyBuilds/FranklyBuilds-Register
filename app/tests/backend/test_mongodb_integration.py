@@ -58,6 +58,26 @@ def mongo_client(tmp_path: Path):
         sync_client.close()
 
 
+def test_outlook_mailcom_startup_indexes_work_with_local_mongodb(tmp_path: Path) -> None:
+    database = f"autoregister_test_{uuid4().hex}"
+    manager = MongoManager(uri=MONGO_URI, database_name=database)
+    app = create_app(
+        settings_path=tmp_path / "settings.json",
+        log_dir=tmp_path / "logs",
+        mongo_manager=manager,
+    )
+    with TestClient(app) as client:
+        assert client.get("/api/health").json()["mongodb"]["status"] == "online"
+        assert client.get("/api/mailcom/health").status_code == 200
+        assert client.get("/api/outlook/register").status_code == 200
+        assert client.get("/api/mailcom/accounts").status_code == 200
+    with MongoClient(MONGO_URI, serverSelectionTimeoutMS=2000) as sync_client:
+        assert sync_client[database]["outlook_register_config"].index_information()
+        assert sync_client[database]["outlook_register_tasks"].index_information()
+        assert sync_client[database]["mailcom_migrations"].index_information()
+        sync_client.drop_database(database)
+
+
 def import_emails(client: TestClient, count: int) -> None:
     raw = "\n".join(
         f"queue.{index}@example.com----https://example.com/s/token-{index}/queue.{index}@example.com"
@@ -66,6 +86,26 @@ def import_emails(client: TestClient, count: int) -> None:
     response = client.post("/api/emails/import", json={"rawText": raw})
     assert response.status_code == 200
     assert response.json()["imported"] == count
+
+
+def import_jp_proxy(client: TestClient) -> None:
+    response = client.post(
+        "/api/proxies/import",
+        json={
+            "rawText": """proxies:
+  - name: integration-jp
+    type: http
+    server: proxy.integration.test
+    port: 18080
+    username: integration-user
+    password: integration-pass
+    country: JP
+    group: 默认组
+"""
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["imported"] == 1
 
 
 def configure_execution(client: TestClient, *, concurrency: int = 2) -> None:
@@ -88,6 +128,7 @@ def test_browser_probe_workspace_preflight_does_not_reserve_when_missing(mongo_c
     client, _ = mongo_client
     configure_execution(client, concurrency=2)
     import_emails(client, 2)
+    import_jp_proxy(client)
     manager = client.app.state.run_manager
 
     async def no_workspaces(_settings):
@@ -114,6 +155,7 @@ def test_browser_probe_route_aggregates_worker_snapshots(mongo_client) -> None:
     client, _ = mongo_client
     configure_execution(client, concurrency=2)
     import_emails(client, 2)
+    import_jp_proxy(client)
     manager = client.app.state.run_manager
 
     async def two_workspaces(_settings):
@@ -762,3 +804,62 @@ def test_manager_recovers_without_recreating_client(tmp_path: Path) -> None:
         if first_process.poll() is None:
             first_process.terminate()
             first_process.wait(timeout=10)
+
+def test_outlook_oauth_configuration_round_trip_persists_public_scopes(mongo_client) -> None:
+    client, _ = mongo_client
+    response = client.put('/api/outlook/register', json={'oauth2': {
+        'client_id': 'CLIENT_ID_FIXTURE', 'Scopes': ['old.scope'],
+    }})
+    assert response.status_code == 200
+    manager = client.app.state.mongo_manager
+    database = manager.database.name
+    assert database.startswith('autoregister_test_')
+    for scopes in (['offline_access', 'Mail.Read'], []):
+        response = client.put('/api/outlook/register', json={'oauth2': {
+            'client_id': '', 'scopes': scopes, 'clientIdConfigured': False,
+        }})
+        assert response.status_code == 200
+        assert 'CLIENT_ID_FIXTURE' not in response.text
+        assert response.json()['config']['oauth2']['scopes'] == scopes
+        with MongoClient(MONGO_URI, serverSelectionTimeoutMS=2000) as db_client:
+            row = db_client[database]['outlook_register_config'].find_one({'_id': 'default'})
+            assert row['config']['oauth2']['Scopes'] == scopes
+            assert row['config']['oauth2']['client_id'] == 'CLIENT_ID_FIXTURE'
+            assert 'clientIdConfigured' not in row['config']['oauth2']
+        client.app.state.outlook_register_tasks._config_cache = None
+        public = client.get('/api/outlook/register')
+        assert public.status_code == 200
+        assert 'CLIENT_ID_FIXTURE' not in public.text
+        assert public.json()['config']['oauth2']['scopes'] == scopes
+        assert public.json()['config']['oauth2']['clientIdConfigured'] is True
+
+
+def test_outlook_shared_proxy_pagination_matches_main_service(mongo_client) -> None:
+    client, _ = mongo_client
+    assert client.app.state.mongo_manager.database.name.startswith('autoregister_test_')
+    import_jp_proxy(client)
+    for size in (10, 20, 50, 100):
+        query = {'pageSize': size, 'q': 'proxy.integration.test', 'country': 'JP'}
+        primary = client.get('/api/proxies', params=query)
+        response = client.get('/api/outlook/proxies', params=query)
+        assert primary.status_code == response.status_code == 200
+        body = response.json()
+        assert body['total'] == primary.json()['total'] == 1
+        assert body['pageSize'] == size
+        assert [row['id'] for row in body['items']] == [row['id'] for row in primary.json()['items']]
+        assert 'integration-user' not in response.text and 'integration-pass' not in response.text
+        second_page = client.get('/api/outlook/proxies', params={**query, 'page': 2})
+        assert second_page.status_code == 200
+        assert second_page.json()['items'] == []
+        assert second_page.json()['total'] == 1
+    for size in (1, 2, 25, 51):
+        response = client.get('/api/outlook/proxies', params={'pageSize': size})
+        assert response.status_code == 422
+    schema_response = client.get('/api/openapi.json')
+    assert schema_response.status_code == 200
+    schema = schema_response.json()
+    for path, default in (('/api/proxies', 10), ('/api/outlook/proxies', 50)):
+        parameter = next(row for row in schema['paths'][path]['get']['parameters'] if row['name'] == 'pageSize')
+        assert parameter['schema']['default'] == default
+        assert parameter['schema']['$ref'] == '#/components/schemas/PageSizeOption'
+    assert schema['components']['schemas']['PageSizeOption']['enum'] == [10, 20, 50, 100]

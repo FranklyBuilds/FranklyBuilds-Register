@@ -13,6 +13,8 @@ CONFIG_PATH = os.path.join(ROOT_DIR, "config.json")
 EXAMPLE_PATH = os.path.join(ROOT_DIR, "config.example.json")
 
 _DEFAULTS: dict[str, Any] = {
+    # Main-service dispatch policy; the legacy runner ignores this key.
+    "execution_mode": "auto",
     "email_suffix": "@outlook.com",
     "headless": False,
     "bot_protection_wait": 15,
@@ -128,6 +130,11 @@ def normalize_config(data: dict[str, Any] | None) -> dict[str, Any]:
     if not suffix.startswith("@"):
         suffix = "@" + suffix
     cfg["email_suffix"] = suffix
+
+    execution_mode = str(cfg.get("execution_mode") or "auto").strip().lower()
+    if execution_mode not in {"auto", "registration", "authorized", "both"}:
+        raise ValueError("execution_mode 只能是 auto / registration / authorized / both")
+    cfg["execution_mode"] = execution_mode
 
     cfg["headless"] = bool(cfg.get("headless"))
     cfg["bot_protection_wait"] = max(1, int(cfg.get("bot_protection_wait") or 15))

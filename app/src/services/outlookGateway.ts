@@ -36,10 +36,54 @@ export interface OutlookProxy {
 export interface OutlookRegisterStats {
   submitted?: number; succeeded?: number; failed?: number; running?: number
   status?: string; tasks?: number; success_tasks?: number | null
+  success_rate?: number; elapsed_seconds?: number; batch_index?: number; concurrent_flows?: number
 }
+export interface OutlookOAuthConfig {
+  enable_oauth2: boolean; redirect_url: string; scopes: string[] | string
+  client_id?: string; clientIdConfigured?: boolean
+}
+
+export interface OutlookRegisterConfig {
+  execution_mode: 'auto' | 'registration' | 'authorized' | 'both'
+  tasks: number; concurrent_flows: number; headless: boolean
+  proxy: { source: string; mode: string; group: string; [key: string]: unknown }
+  oauth2: OutlookOAuthConfig
+  temp_mail?: Record<string, unknown>
+  [key: string]: unknown
+}
+
 export interface OutlookRegisterSnapshot {
-  taskId: string; enabled: boolean; status: string; config: Record<string, any>; stats: OutlookRegisterStats
+  taskId: string; enabled: boolean; status: string; config: OutlookRegisterConfig; stats: OutlookRegisterStats
   failure_stats?: Record<string, number>; result_count?: number; log_count?: number; proxyGroup?: string; proxyCount?: number
+  error?: string | null; startedAt?: string | null; finishedAt?: string | null; updatedAt?: string | null
+}
+
+export interface OutlookPoolStats {
+  total: number; registered: number; oauth2: number; recovery: number; sub: number
+  oauth_ok: number; oauth_bad: number; oauth_unknown: number
+}
+
+export interface OutlookPoolItem {
+  id: string; category: 'registered' | 'oauth2' | 'recovery' | 'sub' | string
+  email: string; parentId?: string; parentEmail?: string; tag?: string
+  passwordConfigured?: boolean; hasClientId?: boolean; hasRefreshToken?: boolean
+  oauthStatus: string; graphStatus?: string; oauthStatusBucket?: string
+  poolStatus?: string; status?: string; source?: string; recoveryEmailConfigured?: boolean
+  recoveryEmail?: string | null; receiveUrl?: string | null; receiveUiUrl?: string | null
+  createdAt?: string; updatedAt?: string; lastError?: string | null
+}
+
+export interface OutlookPoolCheckConfig {
+  enabled: boolean; interval_sec: number; delay_ms: number
+  last_run_at?: string | null; last_result?: Record<string, any> | null; running?: boolean
+}
+
+export interface OutlookSubEmailResult {
+  account_id?: string; parent_email?: string; created: OutlookPoolItem[]; sub_count?: number
+}
+
+export interface OutlookBatchSubEmailResult {
+  ok: boolean; success: number; failed: number; results: OutlookSubEmailResult[]; errors: Array<{ id: string; error: string }>
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -69,7 +113,7 @@ export const outlookGateway = {
   proxies: (page = 1, pageSize = 100) => request<{ items: OutlookProxy[]; total: number; page: number; pageSize: number }>(`/api/outlook/proxies?page=${page}&pageSize=${pageSize}`),
   proxyGroups: () => request<ProxyGroupSummary[]>('/api/outlook/proxy-groups'),
   registerStatus: () => request<OutlookRegisterSnapshot>('/api/outlook/register'),
-  updateRegisterConfig: (config: Record<string, any>) => request<{ config: Record<string, any> }>('/api/outlook/register', { method: 'PUT', body: JSON.stringify(config) }),
+  updateRegisterConfig: (config: OutlookRegisterConfig) => request<{ config: OutlookRegisterConfig }>('/api/outlook/register', { method: 'PUT', body: JSON.stringify(config) }),
   startRegister: () => request<OutlookRegisterSnapshot>('/api/outlook/register/start', { method: 'POST' }),
   stopRegister: () => request<OutlookRegisterSnapshot>('/api/outlook/register/stop', { method: 'POST' }),
   resetRegister: () => request<OutlookRegisterSnapshot>('/api/outlook/register/reset', { method: 'POST' }),
@@ -82,6 +126,20 @@ export const outlookGateway = {
   messages: (id: string, top = 20) => request<{ email: string; messages: OutlookMessage[] }>(`/api/outlook/accounts/${encodeURIComponent(id)}/messages?top=${top}`),
   message: (id: string, messageId: string) => request<{ email: string; message: OutlookMessage & { body: string; bodyType: string } }>(`/api/outlook/accounts/${encodeURIComponent(id)}/messages/${encodeURIComponent(messageId)}`),
   export: (ids?: string[]) => request<string>('/api/outlook/export', { method: 'POST', body: JSON.stringify({ ids: ids?.length ? ids : null }) }),
+  poolStats: () => request<{ stats: OutlookPoolStats }>('/api/outlook/pool/stats'),
+  poolAccounts: (query: { category?: string; keyword?: string; country?: string; age?: string; oauth_status?: string; page?: number; page_size?: number } = {}) => {
+    const params = new URLSearchParams()
+    for (const [key, value] of Object.entries(query)) if (value !== undefined && value !== '') params.set(key, String(value))
+    return request<{ items: OutlookPoolItem[]; total: number; page: number; page_size: number }>(`/api/outlook/pool/accounts?${params}`)
+  },
+  generateSubEmails: (accountId: string, count = 1, tagPrefix = '') => request<OutlookSubEmailResult>(`/api/outlook/pool/accounts/${encodeURIComponent(accountId)}/sub-emails`, { method: 'POST', body: JSON.stringify({ count, tag_prefix: tagPrefix }) }),
+  batchGenerateSubEmails: (ids: string[], count = 1, tagPrefix = '') => request<OutlookBatchSubEmailResult>('/api/outlook/pool/batch/sub-emails', { method: 'POST', body: JSON.stringify({ ids, count, tag_prefix: tagPrefix }) }),
+  batchCheckPoolOauth: (ids: string[]) => request<Record<string, any>>('/api/outlook/pool/batch/check-oauth', { method: 'POST', body: JSON.stringify({ ids }) }),
+  deletePoolItems: (ids: string[]) => request<{ deleted: number }>('/api/outlook/pool/accounts', { method: 'DELETE', body: JSON.stringify({ ids }) }),
+  exportPool: (category: string, ids?: string[], country = '') => request<string>('/api/outlook/pool/export', { method: 'POST', body: JSON.stringify({ category, ids: ids?.length ? ids : null, country: country || null }) }),
+  oauthCheckConfig: () => request<{ config: OutlookPoolCheckConfig }>('/api/outlook/pool/config/oauth-check'),
+  updateOauthCheckConfig: (config: Partial<OutlookPoolCheckConfig>) => request<{ ok: boolean; config: OutlookPoolCheckConfig }>('/api/outlook/pool/config/oauth-check', { method: 'PUT', body: JSON.stringify(config) }),
+  receive: (token: string, top = 10) => request<{ ok: boolean; email: string; latest_code?: string | null; codes?: string[]; messages: OutlookMessage[]; receive_ui_url?: string }>(`/api/outlook/pool/receive/${encodeURIComponent(token)}?top=${top}`),
 }
 
 export function asOutlookEmail(row: OutlookAccount): Pick<EmailRecord, 'sourceType' | 'outlookAccountId'> {

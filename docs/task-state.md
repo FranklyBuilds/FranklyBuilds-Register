@@ -6,54 +6,72 @@
 
 ## 当前任务
 
-在不改变 Outlook 外部注册流程和反滥用行为的前提下，完成 Outlook 任务管理、MailCom Hub 主服务化、统一启动/停止与旧数据迁移回滚闭环。
+完成 `outlook所有功能都要在register里面完整执行`：Outlook 注册浏览器引擎、OAuth/Graph、邮箱池/Plus 子邮箱、接码与 OTP、主 Mongo 代理、独立任务生命周期、MailCom 联动和 Vue 控制台全部由 Register 主服务承载。
 
 ## 任务范围
 
-- 涉及：`app/backend` Outlook 独立任务状态/配置/日志/结果写入、主 Mongo 代理分组接入、MailCom 账号/别名/IMAP/OTP/服务器推送服务化、SQLite 幂等迁移与 DPAPI 重新保护、Vue 控制台、Windows 启停与生产静态前端服务、相关测试和文档。
-- 不涉及：新增或改造第三方平台注册自动化、验证码/反滥用规避策略、外部目标行为；已有 Outlook 注册引擎仅作为可插拔执行适配器接入，不扩大其行为。
-- 当前日期：2026-09-24。
-- 验收：Outlook 任务与 GPT 任务完全隔离；配置可读/写/校验；启动/停止/进度/日志/失败统计独立持久化；注册结果不依赖旧 `Results` 文件并写入 Mongo；代理来自主 Mongo 且支持分组；MailCom SQLite 重复迁移不重复建档、不覆盖源文件，凭据解密后重新使用主服务 DPAPI 保护；普通 API/日志/统计不返回凭据；主服务可提供生产 Vue 控制台且启停流程不依赖 3211/8001；前后端检查与测试通过。
+- 涉及：`app/backend` Outlook 独立任务状态/配置/日志/结果写入、旧注册引擎适配、主 Mongo 代理分组接入、邮箱池/子邮箱/OTP/OAuth 定时检查、MailCom 账号/别名/IMAP/OTP/服务器推送服务化、SQLite 幂等迁移与 DPAPI 重新保护、Vue 控制台、Windows 启停与生产静态前端服务、相关测试和文档。
+- 不涉及：改变既有平台注册流程、验证码或反滥用规避策略；本任务只把现有 Outlook 执行引擎接入 Register 的任务、结果、代理和日志边界，不新增规避行为。
+- 当前日期：2026-09-25。
+- 验收：Outlook 任务与 GPT 任务完全隔离；配置可读/写/校验；启动/停止/进度/日志/失败统计独立持久化；注册结果不依赖旧 `Results` 文件并写入 Mongo；代理来自主 Mongo 且支持分组；邮箱池和接码数据来自 Mongo；MailCom SQLite 重复迁移不重复建档、不覆盖源文件，凭据解密后重新使用主服务 DPAPI 保护；普通 API/日志/统计不返回账号凭据或 refresh token；主服务可提供生产 Vue 控制台且启停流程不依赖 3211/8001；前后端检查与测试通过。
 
 ## 当前阶段
 
-PR 审核修复已完成，待推送后由最新 CI 复核；真实外部服务验收按环境条件保留为部署后操作。
+代码融合已进入“主服务可运行、真实外部注册待受控验证”阶段。Outlook 任务现在使用 `auto / registration / authorized / both` 四种执行模式：`auto` 优先校验 Mongo 中已有 OAuth 账号，没有候选时进入现有浏览器注册引擎；注册结果通过回调写入 Mongo，并在 OAuth/Graph 校验通过后发布邮箱池。
 
 ## 已完成
 
 - 已新增独立 Outlook 注册任务 Mongo 服务：配置校验/脱敏、独立任务状态、启动/停止/重置、日志和失败统计；API 不再读取 GPT `runs`。
 - Outlook 页面已增加独立任务控制、配置保存、代理组/代理计数和日志展示；前端 gateway 已补齐任务接口。
-- 默认执行适配器保持关闭，避免把第三方平台注册自动化或反滥用行为隐式纳入主服务；适配器接收主 Mongo 代理候选，不回退到本地 7890。
+- 已移除“注册执行适配器未启用”的默认路径；主服务通过统一适配器按 `auto / registration / authorized / both` 分流，明确记录执行模式。
+- 旧浏览器注册引擎已通过动态加载适配到主任务，接收主 Mongo 代理候选；Mongo 代理源无可用候选时会在启动浏览器前失败，不回退到本地 7890。
+- 运行期 `result_sink` 存在时，旧引擎结果直接进入 `outlook_accounts`，并等待浏览器线程收尾后再清理 sink；`Results` 文件仅保留迁移/回滚来源。
 - 已接入 Outlook Mongo store、按规范化邮箱幂等的旧 `Results` 文件导入、只读校验备份与迁移统计；迁移只读取旧 `Results`，不覆盖或删除原件。
 - 已接入 OAuth/Graph 验证、Graph 邮件读取及邮箱池发布门槛；GPT 成功分配 Outlook 邮箱时保留账号关联并标记为已分配。
 - 已将 Outlook 账号管理页切换到主 API；代理清单与分组复用主 Mongo 资源；邮箱池支持 Outlook 来源筛选和分配状态展示。
 - 旧 Outlook 8001 服务未由主启停脚本启动；主服务已提供 Outlook 账号/Graph 管理 API。
-- 已补迁移、OAuth/Graph/OTP 读信模拟、敏感字段隔离、导入幂等、冲突邮箱不接管、GPT 成功分配及邮箱换绑测试。
-- 前端和后端既有测试在上一阶段通过；本次 PR 审核补丁新增迁移冲突回归覆盖。
+- 已补迁移、OAuth/Graph/OTP 读信模拟、敏感字段隔离、导入幂等、冲突邮箱不接管、GPT 成功分配、邮箱换绑，以及 Mongo browser-probe 集成夹具测试。
+- 已补统一适配器模式分流、同步 worker 收尾不自锁、停止期间不被迟到进度重开、日志凭据脱敏、接码子邮箱收件人隔离、邮箱池运行 API，以及主任务启动到 Mongo 代理注入的回归测试。
+- 已移除无依赖时的生命周期-only disabled fallback；独立构造 `OutlookRegisterTaskService` 也会自动接入统一执行适配器，避免误报“仅完成任务生命周期检查”。
+- Vue 已补执行模式、任务轮询、邮箱池分类/子邮箱生成/批量 OAuth/定时检查/导出/OTP 操作。
 
 ## 进行中
 
-- 推送 PR 审核修复并等待最新 CI；真实 Microsoft OAuth/Graph、真实 MongoDB、真实 IMAP 和 Windows 本机端到端冒烟仍需在具备对应外部服务的环境执行。
+- 主服务已重启并运行在 `127.0.0.1:8000`；需要在有明确测试账号、可用 Mongo 代理和受控浏览器环境时验证真实注册引擎的浏览器执行、结果入库和 Graph 发布。
+- 真实 Microsoft OAuth/Graph、真实 IMAP、真实验证码邮件和外部代理仍需对应环境执行；当前不能把离线模拟当作真实注册交付。
 
 ## 已验证的本阶段结果
+
+- 修正 Outlook 注册任务配置/任务集合及 MailCom 迁移集合的 `_id` 索引声明；Mongo 自动维护 `_id` 唯一索引，不能以 `unique=True` 重复创建。新增真实 Mongo 集成回归测试。
+- Outlook 统一适配器已接入主任务：模式分流、账号筛选、OAuth/Graph 校验、Mongo 代理传递、邮箱池发布和独立统计均有模拟测试。
+- 当前 focused Outlook/Mongo API 测试：47 passed；全后端测试：783 passed、14 skipped。
+- 本地 Mongo 集成套件本次结果为 12 passed、1 warning；已补齐 browser-probe 请求默认国家和 JP 代理夹具，Mongo 集成门禁现在全绿。
+- 前端本阶段已执行：Vitest 16 文件/119 项通过，`npm run type-check` 和 `npm run build-only` 通过；生产构建保留主 chunk 超过 500 KB 的非阻断提示。
+- 主服务重启冒烟：`/api/health`、`/api/mailcom/health`、`/api/outlook/register`、Outlook pool stats/accounts、`/launch`、`/mailcom`、`/outlook-register` 均 200；授权模式空候选任务完成且日志显示真实授权执行器，不再显示“适配器未启用”。当前监听仅有 8000，未启动 3211、8001、5173。
 
 - MailCom Mongo service、内部 `mailcom://account|alias` 句柄、SQLite 只读备份/副本迁移和主服务 DPAPI 前缀重加密已落地。
 - 主服务邮箱同步不再主动请求旧 3211；旧 HTTP 句柄仅保留迁移/回滚兼容。
 - 新增服务级测试覆盖 MailCom 导入幂等/脱敏、别名同步、Outlook 独立任务状态/代理组/结果入库。
 - 前端 Vitest：16 个文件、119 项通过（全量验证使用 10 秒测试超时）；type-check/build-only 通过；生产构建仅有主 chunk 超过 500 KB 的非阻断提示。
-- 后端：768 passed、13 skipped；MailCom 兼容测试 14 passed；Python compileall 和 git diff --check 通过。
+- 后端：本次全量 `app/tests/backend` 为 783 passed、14 skipped；Python compileall 和 git diff --check 通过。MailCom 兼容相关测试包含在该结果中。
 - 静态托管冒烟：`/api/health` 200，`/launch`、`/mailcom`、`/outlook-register` 200；未知 `/api/tools/payment-links` POST 404。
+- 受控本地浏览器执行探针已从主 API 走通：配置 `execution_mode=registration`、`tasks=1`、`concurrent_flows=1` 并注入主 Mongo 代理后，任务提交 1 个浏览器流程，日志出现“浏览器注册执行引擎已启用”，未出现“适配器未启用”；由于探针代理是故意不可连的本地端口，最终按 `browser_launch_fail=1` 结束，Mongo 账号/邮箱池保持 0，证明失败被正确收口而不是假报成功。探针代理已删除，任务已重置。
+- 修复 Outlook 任务 reset 后遗留 `proxyGroup`/`proxyCount` 的生命周期元数据；重点测试现为 47 passed，重启主服务后通过 HTTP 验证 reset 会清空旧代理元数据。
+- 任务异常日志现在保留脱敏后的可诊断错误明细；密码、Token 等敏感值仍不会进入日志。
 
 ## 待处理 / 风险
 
-- 尚未在当前环境执行真实 Microsoft OAuth/Graph、真实 MongoDB、真实 IMAP 和真实 Windows 进程启停；已完成离线模拟与静态托管冒烟，部署时需按验收命令执行。
+- 代码已推送到 `codex/outlook-single-service`，现有 PR #5 已更新且 CI 通过；PR 仍保持 OPEN，等待真实外部注册验收。
+- 真实浏览器注册引擎尚未在受控测试账号/代理环境运行；当前 Mongo 代理池为空，不能用生产账号或无代理配置宣称注册链路已验收。
+- `outlook.com` 消费者账号创建仍沿用仓库已有浏览器引擎；本次没有改动其验证码/反滥用行为，也没有为其新增规避逻辑。
+- 真实 Microsoft OAuth/Graph、IMAP、验证码邮件和外部代理仍需对应环境执行；本地受控探针只证明主服务已调用浏览器引擎并正确记录失败，不能替代真实账号成功验收。
 - 生产前端主 chunk 约 800 KB；构建成功，本任务不做无关分包改造。
-- 真实 Outlook 注册执行适配器未启用；当前交付的是独立任务管理、Mongo 结果接收和可插拔适配器边界，不扩展第三方平台注册/反滥用流程。
-- 后端测试仍有一个既有测试夹具的 coroutine 未 await 警告，不影响 767 项通过结果。
+- 后端存在既有 `httpx`/Starlette 弃用提示和一个 coroutine 未 await 警告，不影响当前测试退出码。
 
 ## 决策记录
 
 - Outlook 任务使用独立 `outlook_register_tasks`、`outlook_register_logs` 和 `outlook_register_config` 集合，不复用 GPT `runs`。
+- `execution_mode=auto` 是默认值：有 Mongo OAuth 候选走授权校验；无候选走已有浏览器注册引擎；需要强制行为时使用 `registration`、`authorized` 或 `both`。
 - Outlook 结果通过任务执行适配器写入 `outlook_accounts`；旧 `Results` 仅作为首次迁移/回滚来源。
 - MailCom 凭据从旧 SQLite DPAPI 解密后，使用主服务当前 Windows 用户 DPAPI 新前缀重新加密；不直接搬运旧加密 blob。
 - MailCom 普通列表、邮箱池列表、任务日志和迁移统计只返回脱敏元数据；凭据仅在需要 IMAP/别名操作时在服务内部解密。
@@ -70,4 +88,42 @@ PR 审核修复已完成，待推送后由最新 CI 复核；真实外部服务�
 
 ## 下一步唯一动作
 
-提交并推送 PR 审核修复，等待最新 CI 通过后复核 mergeability 并合并；部署环境再按真实 Mongo、OAuth/Graph、IMAP 和 Windows 启停验收命令复核。
+重启现有主后端以加载配置保存与共享代理分页修复，再以明确提供的测试环境完成以下外部验收：
+
+在受控测试环境配置一个非生产 Outlook 测试账号、可用主 Mongo 代理和小任务数，运行 `execution_mode=registration` 的真实浏览器注册；核对任务日志/停止流程、Mongo `outlook_accounts` 与邮箱池写入，以及 `Results` 文件未被运行期修改，完成受控注册验收后更新 PR #5 的验收证据，再决定合并。
+
+## 本轮配置链路补齐
+- 主 Vue 缺少 OAuth 配置入口；小写 scopes 保存会被旧 Scopes 覆盖。
+- 本轮只修改配置接口、Vue 表单与回归测试，不改变注册流程。
+- 验收：配置持久化、凭据脱敏、草稿不被轮询覆盖、类型检查/测试/构建通过。
+- 已补齐：主 Vue OAuth 开关、Client ID、回调地址、权限范围；Client ID 空值保留、成功保存后清空输入框、响应只显示配置标志。
+- 已修复：公共 `scopes` 覆盖内部 `Scopes`（包括清空）；不保存响应元数据；轮询/刷新不覆盖草稿，迟到响应不覆盖已保存配置；未保存配置阻止启动。
+- 验证：后端全量 785 passed / 14 skipped；前端 18 文件 / 127 测试通过；type-check、build-only 通过；实际 8000 页面浏览器冒烟通过（新控件可见、刷新保留草稿、无页面异常），未保存生产配置或启动注册。
+- 后端自动重启命令被执行策略拒绝，现有进程未被停止；线上仍需重启才能加载此次 Python 配置保存修复。新版静态前端已构建。
+- 回滚：回退此次配置补齐提交，重新构建前端并重启主服务；无数据库结构迁移，既有配置保留。
+
+- 新增真实 Mongo API 配置持久化回归；隔离数据库集成测试 13 passed。核对修改/清空 scopes、空 Client ID 保留、落库字段及清除缓存后重新读取；未操作生产账号数据。
+
+## 本轮任务运行可视化与刷新一致性
+- 当前目标不变：Outlook 功能在 Register 内完整执行；外部成功注册验收仍待真实测试环境。
+- 已复现：后端运行指标/失败分类未展示；空闲页面不轮询；旧请求可能覆盖停止/重置状态。
+- 本轮范围：任务监控 Vue 组件、快照类型、状态/日志刷新边界与回归测试；不修改注册执行或反滥用逻辑。
+- 已修复：展示真实计数、耗时、失败事件和错误码；区分生命周期完成与注册成功；空闲轮询、失败可见与过期响应隔离。
+- 验收命令：前端定向测试、type-check、完整 npm test、build-only、实际页面冒烟及 git diff --check。
+- 验证通过：前端 19 文件 / 143 测试（任务视图与监控组件共 20 项），type-check、build-only、git diff --check；新增停止/重置/启动竞态、无重叠读取、断线恢复、无数据、失败终态及转义覆盖。
+- 实际主服务页面冒烟：8000 返回 200，真实快照为 idle / 全部计数 0；浏览器内模拟 running → completed（含失败）→ 503 → 恢复真实快照，自动轮询和显示检查通过，页面异常 0，写请求 0，前后生产状态一致。模拟故障用于界面验证，不代表真实外部注册完成。
+- 主入口健康检查 ok；只监听 8000，3211/8001/5173 无监听。本轮未重启后端，上一轮 Python 配置保存修复仍需重启加载。
+- 本轮未修改 Python 或数据库；后端回归沿用上一提交 CI 的成功结果，新增变更交由本次 PR CI 复核。既有前端 EmailChangeDialog 告警和大 chunk 提示未纳入本轮范围。
+- 回滚：回退本次监控提交并重新构建 Vue；无需数据库迁移。
+- 已提交 effe841；PR #5 Windows CI 36196244621 全部通过，仍保持 OPEN；整体外部验收未完成。
+
+## 共享代理分页验收修复
+- 目标：Outlook 共享代理接口遵循主服务分页规范，非法输入不触发 500。涉及 main.py、resource_models.py、outlook_service.py 与现有 Mongo API 测试；不修改任务执行或数据库数据。
+- 实际复现：运行中 8000 的 `/api/outlook/proxies?pageSize=1` 返回 500，pageSize=100 正常返回 200 / total=0。路由接受 1–100，但下游 Page 仅允许 10/20/50/100，契约不一致。
+- 失败回归已证实：1、2、25、51 四个输入返回 500；不是 Mongo 离线。修复使用主服务共享分页枚举，在路由入口返回 422；保留 Outlook 默认页大小 50。
+- 已再次确认：主服务健康 ok，Outlook 账号 0、邮箱池 0、代理 0、代理组 0；OAuth 已配置标志不等于外部授权已通过。实际成功注册仍缺测试环境。
+- 遗留引用审计：主入口向 AccountPipelineService 注入 MailComService；`mailcom://` 收信与到账确认在进程内执行。3211 仍用于显式旧 HTTP URL 的兼容分支及旧邮箱查看器，未直接删除；不将端口未监听等同于所有历史记录路径已验证。
+- 验证完成：代理定向回归 15 passed；完整后端 799 passed / 16 skipped；新增隔离 Mongo 分页集成测试 1 passed / 13 deselected，核对筛选、第二页、同源代理 ID、凭据脱敏以及实际 `/api/openapi.json` 的枚举/默认值。Python compileall、git diff --check 通过。
+- 修复只移动/复用分页枚举，未改任务引擎、数据库结构或前端；既有 httpx/未 await 协程/OpenAPI Operation ID 警告未作为本轮功能扩大处理。
+- 运行状态：主服务 PID 16628 仍未重启，8000 的旧代码仍可能对 pageSize=1 返回 500；不将隔离 TestClient 验证冒充现有进程已加载修复。
+- 回滚：回退本轮提交并重启主服务；无数据迁移。当前代码已验证，提交现有 PR #5 核对 CI 后，唯一执行验收动作仍是加载新后端并补齐真实测试环境。
