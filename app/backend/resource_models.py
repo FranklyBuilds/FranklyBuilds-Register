@@ -2,9 +2,17 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
+from enum import IntEnum
 from typing import Any, Generic, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+
+class PageSizeOption(IntEnum):
+    TEN = 10
+    TWENTY = 20
+    FIFTY = 50
+    ONE_HUNDRED = 100
 
 
 PageSize = Literal[10, 20, 50, 100]

@@ -9,7 +9,6 @@ import queue
 import re
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from enum import IntEnum
 from pathlib import Path
 from typing import Annotated, Any
 from uuid import UUID
@@ -107,6 +106,7 @@ from .resource_models import (
     MockRunCreate,
     OverviewStats,
     Page,
+    PageSizeOption,
     ProxyRecord,
     ProxyCountrySummary,
     ProxyGroupSummary,
@@ -144,13 +144,6 @@ class MailComServerSyncInput(BaseModel):
     port: int = Field(default=22, ge=1, le=65535)
     username: str = Field(min_length=1, max_length=128)
     password: SecretStr
-
-
-class PageSizeOption(IntEnum):
-    TEN = 10
-    TWENTY = 20
-    FIFTY = 50
-    ONE_HUNDRED = 100
 
 
 def _snake_key(value: str) -> str:

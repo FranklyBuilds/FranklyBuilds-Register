@@ -20,6 +20,7 @@ from pymongo.errors import DuplicateKeyError
 
 from .errors import ResourceNotFoundError
 from .mailbox_client import MailboxClient, MailboxClientError, MailboxSnapshot, parse_mail_datetime, parse_mailbox_snapshot
+from .resource_models import PageSizeOption
 from .resource_service import MongoResourceStore, normalize_email, utc_now
 
 RESULTS_ROOT = Path(__file__).resolve().parents[1] / "outlook_register" / "Results"
@@ -1186,12 +1187,12 @@ class OutlookService:
         async def list_shared_proxies(
             request: Request,
             page: int = Query(1, ge=1),
-            page_size: int = Query(50, alias="pageSize", ge=1, le=100),
+            page_size: PageSizeOption = Query(PageSizeOption.FIFTY, alias="pageSize"),
             q: str = Query(default="", max_length=320),
             country: str = Query(default="", max_length=2),
         ):
             request.app.state.mongo_manager.require_online()
-            result = await request.app.state.resource_store.list_proxies(page, page_size, q, country)
+            result = await request.app.state.resource_store.list_proxies(page, int(page_size), q, country)
             return {
                 "items": [
                     OutlookProxyView(

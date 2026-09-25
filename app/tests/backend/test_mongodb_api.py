@@ -1915,3 +1915,36 @@ def test_outlook_config_public_scopes_replace_existing_scopes(scopes) -> None:
         assert internal["oauth2"]["client_id"] == "CLIENT_ID_FIXTURE"
         assert "clientIdConfigured" not in internal["oauth2"]
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize('page_size', [1, 2, 25, 51, 101, 0, -1, 'invalid', '10.5'])
+def test_outlook_shared_proxies_reject_unsupported_page_sizes(tmp_path: Path, page_size) -> None:
+    manager = _OutlookFakeManager()
+    app = create_app(settings_path=tmp_path / 'settings.json', log_dir=tmp_path / 'logs', mongo_manager=manager)
+    client = TestClient(app, raise_server_exceptions=False)
+    for path in ('/api/proxies', '/api/outlook/proxies'):
+        response = client.get(path, params={'pageSize': page_size})
+        assert response.status_code == 422, (path, page_size, response.status_code)
+        assert 'SECRET_' not in response.text
+
+
+@pytest.mark.parametrize('page_size', [10, 20, 50, 100])
+def test_outlook_shared_proxies_accept_main_service_page_sizes(tmp_path: Path, page_size: int) -> None:
+    manager = _OutlookFakeManager()
+    app = create_app(settings_path=tmp_path / 'settings.json', log_dir=tmp_path / 'logs', mongo_manager=manager)
+    client = TestClient(app)
+    primary = client.get('/api/proxies', params={'pageSize': page_size, 'page': 1})
+    outlook = client.get('/api/outlook/proxies', params={'pageSize': page_size, 'page': 1})
+    assert primary.status_code == outlook.status_code == 200
+    assert primary.json()['total'] == outlook.json()['total']
+    assert outlook.json()['pageSize'] == page_size
+    assert outlook.json()['page'] == 1
+    assert 'SECRET_USER' not in outlook.text and 'SECRET_PROXY' not in outlook.text
+
+
+def test_outlook_shared_proxies_keep_default_page_size(tmp_path: Path) -> None:
+    manager = _OutlookFakeManager()
+    app = create_app(settings_path=tmp_path / 'settings.json', log_dir=tmp_path / 'logs', mongo_manager=manager)
+    response = TestClient(app).get('/api/outlook/proxies')
+    assert response.status_code == 200
+    assert response.json()['pageSize'] == 50

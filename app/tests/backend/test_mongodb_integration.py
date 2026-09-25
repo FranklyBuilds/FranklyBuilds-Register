@@ -832,3 +832,34 @@ def test_outlook_oauth_configuration_round_trip_persists_public_scopes(mongo_cli
         assert 'CLIENT_ID_FIXTURE' not in public.text
         assert public.json()['config']['oauth2']['scopes'] == scopes
         assert public.json()['config']['oauth2']['clientIdConfigured'] is True
+
+
+def test_outlook_shared_proxy_pagination_matches_main_service(mongo_client) -> None:
+    client, _ = mongo_client
+    assert client.app.state.mongo_manager.database.name.startswith('autoregister_test_')
+    import_jp_proxy(client)
+    for size in (10, 20, 50, 100):
+        query = {'pageSize': size, 'q': 'proxy.integration.test', 'country': 'JP'}
+        primary = client.get('/api/proxies', params=query)
+        response = client.get('/api/outlook/proxies', params=query)
+        assert primary.status_code == response.status_code == 200
+        body = response.json()
+        assert body['total'] == primary.json()['total'] == 1
+        assert body['pageSize'] == size
+        assert [row['id'] for row in body['items']] == [row['id'] for row in primary.json()['items']]
+        assert 'integration-user' not in response.text and 'integration-pass' not in response.text
+        second_page = client.get('/api/outlook/proxies', params={**query, 'page': 2})
+        assert second_page.status_code == 200
+        assert second_page.json()['items'] == []
+        assert second_page.json()['total'] == 1
+    for size in (1, 2, 25, 51):
+        response = client.get('/api/outlook/proxies', params={'pageSize': size})
+        assert response.status_code == 422
+    schema_response = client.get('/api/openapi.json')
+    assert schema_response.status_code == 200
+    schema = schema_response.json()
+    for path, default in (('/api/proxies', 10), ('/api/outlook/proxies', 50)):
+        parameter = next(row for row in schema['paths'][path]['get']['parameters'] if row['name'] == 'pageSize')
+        assert parameter['schema']['default'] == default
+        assert parameter['schema']['$ref'] == '#/components/schemas/PageSizeOption'
+    assert schema['components']['schemas']['PageSizeOption']['enum'] == [10, 20, 50, 100]
