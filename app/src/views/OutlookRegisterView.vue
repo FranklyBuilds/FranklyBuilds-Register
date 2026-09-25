@@ -5,6 +5,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { outlookGateway, type OutlookAccount, type OutlookMessage, type OutlookPoolCheckConfig, type OutlookPoolItem, type OutlookPoolStats, type OutlookProxy, type OutlookRegisterSnapshot } from '@/services/outlookGateway'
 import type { ProxyGroupSummary } from '@/types'
 import OutlookOAuthConfig from '@/components/OutlookOAuthConfig.vue'
+import OutlookTaskStatus from '@/components/OutlookTaskStatus.vue'
 import { useOutlookRegisterConfig } from '@/composables/useOutlookRegisterConfig'
 
 const rows = ref<OutlookAccount[]>([])
@@ -24,6 +25,7 @@ const resultRows = ref<Array<{ email: string; oauthStatus: string; graphStatus: 
 const proxyTotal = ref(0)
 const registerLogs = ref<Array<{ createdAt: string; level: string; line: string }>>([])
 const registerAction = ref(false)
+const taskLoadError = ref('')
 const { config: registerConfig, dirty: registerConfigDirty, accept: acceptRegisterConfig, payload: registerConfigPayload, generation: registerConfigRevision } = useOutlookRegisterConfig()
 const poolStats = ref<OutlookPoolStats | null>(null)
 const poolRows = ref<OutlookPoolItem[]>([])
@@ -38,8 +40,9 @@ const poolOtp = ref<Record<string, string>>({})
 
 const proxyGroupCount = computed(() => proxyGroups.value.length)
 const registrationSummary = computed(() => {
-  const stats = registerStatus.value?.stats || {}
-  return `Outlook 独立任务：${registerStatus.value?.status || stats.status || 'idle'} · 提交 ${stats.submitted || 0} · 成功 ${stats.succeeded || 0} · 失败 ${stats.failed || 0}`
+  if (!registerStatus.value) return 'Outlook 独立任务：尚未读取状态'
+  const stats = registerStatus.value.stats
+  return `Outlook 独立任务：${registerStatus.value.status} · 提交 ${stats.submitted ?? '—'} · 成功 ${stats.succeeded ?? '—'} · 失败 ${stats.failed ?? '—'}`
 })
 
 function statusType(value: string) {
@@ -50,47 +53,62 @@ function statusType(value: string) {
 }
 
 let taskTimer: number | undefined
+let taskRequestVersion = 0
+let activeTaskRead: number | null = null
+let disposed = false
+
+function currentTaskRequest(version: number) { return !disposed && version === taskRequestVersion }
+function beginTaskMutation() {
+  activeTaskRead = null
+  return ++taskRequestVersion
+}
 
 async function refreshTaskState() {
+  if (disposed || registerAction.value || activeTaskRead !== null) return
+  const version = ++taskRequestVersion
+  activeTaskRead = version
   const configRevision = registerConfigRevision()
   try {
     const [status, logs] = await Promise.all([outlookGateway.registerStatus(), outlookGateway.registerLogs()])
+    if (!currentTaskRequest(version)) return
     registerStatus.value = status
     acceptRegisterConfig(status.config, false, configRevision)
     registerLogs.value = logs.items
-  } catch { /* the main refresh displays transport failures */ }
+    taskLoadError.value = ''
+  } catch {
+    if (currentTaskRequest(version)) taskLoadError.value = '任务状态刷新失败；当前数据可能过期，稍后自动重试。'
+  } finally {
+    if (activeTaskRead === version) activeTaskRead = null
+  }
 }
 
 async function refresh() {
-  const configRevision = registerConfigRevision()
   loading.value = true
   try {
-    const [page, migrationResult, result, proxyPage, groups, status, poolStatsResult, poolPage, poolConfigResult] = await Promise.all([
+    const [page, migrationResult, result, proxyPage, groups, poolStatsResult, poolPage, poolConfigResult] = await Promise.all([
       outlookGateway.list({ page: 1, pageSize: 200, q: search.value, poolStatus: filter.value }),
       outlookGateway.migration(),
       outlookGateway.results(100, search.value),
       outlookGateway.proxies(1, 100),
       outlookGateway.proxyGroups(),
-      outlookGateway.registerStatus(),
       outlookGateway.poolStats(),
       outlookGateway.poolAccounts({ category: poolCategory.value, keyword: poolSearch.value, page: 1, page_size: 200 }),
       outlookGateway.oauthCheckConfig(),
+      refreshTaskState(),
     ])
+    if (disposed) return
     rows.value = page.items
     migration.value = migrationResult.summary || migrationResult
     resultRows.value = result
     proxies.value = proxyPage.items
     proxyTotal.value = proxyPage.total
     proxyGroups.value = groups
-    registerStatus.value = status
-    acceptRegisterConfig(status.config, false, configRevision)
     poolStats.value = poolStatsResult.stats
     poolRows.value = poolPage.items
     poolCheckConfig.value = poolConfigResult.config
-    registerLogs.value = (await outlookGateway.registerLogs()).items
     if (selected.value) selected.value = rows.value.find((item) => item.id === selected.value?.id) || null
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : 'Outlook 数据读取失败')
+    if (!disposed) ElMessage.error(error instanceof Error ? error.message : 'Outlook 数据读取失败')
   } finally { loading.value = false }
 }
 
@@ -124,32 +142,51 @@ function escapeHtml(value: string) {
 
 
 async function runRegisterAction(action: 'start' | 'stop' | 'reset') {
+  if (registerAction.value) return
   const configRevision = registerConfigRevision()
   if (action === 'start' && registerConfigDirty.value) {
     ElMessage.warning('请先保存配置，再启动 Outlook 任务')
     return
   }
+  const version = beginTaskMutation()
   registerAction.value = true
   try {
     const result = action === 'start' ? await outlookGateway.startRegister() : action === 'stop' ? await outlookGateway.stopRegister() : await outlookGateway.resetRegister()
+    if (!currentTaskRequest(version)) return
     registerStatus.value = result
     acceptRegisterConfig(result.config, false, configRevision)
-    registerLogs.value = (await outlookGateway.registerLogs()).items
+    taskLoadError.value = ''
     const stopMessage = result.status === 'stopping' ? '已发送停止请求，等待浏览器收尾' : 'Outlook 任务已停止'
     ElMessage.success(action === 'start' ? 'Outlook 任务已启动' : action === 'stop' ? stopMessage : 'Outlook 任务已重置')
-  } catch (error) { ElMessage.error(error instanceof Error ? error.message : '任务操作失败') }
-  finally { registerAction.value = false }
+    try {
+      const logs = await outlookGateway.registerLogs()
+      if (currentTaskRequest(version)) registerLogs.value = logs.items
+    } catch {
+      if (currentTaskRequest(version)) taskLoadError.value = '任务操作已生效，但日志刷新失败；稍后自动重试。'
+    }
+  } catch (error) {
+    if (currentTaskRequest(version)) {
+      taskLoadError.value = '任务操作结果尚未确认，稍后自动刷新状态。'
+      ElMessage.error(error instanceof Error ? error.message : '任务操作失败')
+    }
+  } finally { registerAction.value = false }
 }
 
 async function saveRegisterConfig() {
+  if (registerAction.value) return
+  beginTaskMutation()
   registerAction.value = true
+  let saved = false
   try {
     const result = await outlookGateway.updateRegisterConfig(registerConfigPayload())
+    if (disposed) return
     acceptRegisterConfig(result.config, true)
     ElMessage.success('Outlook 注册任务配置已保存')
-    await refresh()
-  } catch (error) { ElMessage.error(error instanceof Error ? error.message : '配置保存失败') }
-  finally { registerAction.value = false }
+    saved = true
+  } catch (error) {
+    if (!disposed) ElMessage.error(error instanceof Error ? error.message : '配置保存失败')
+  } finally { registerAction.value = false }
+  if (saved) await refresh()
 }
 
 async function importAccounts() {
@@ -338,12 +375,11 @@ async function removeAccount(row: OutlookAccount) {
 
 onMounted(() => {
   void refresh()
-  taskTimer = window.setInterval(() => {
-    if (registerStatus.value?.enabled || registerStatus.value?.status === 'stopping') void refreshTaskState()
-  }, 2000)
+  taskTimer = window.setInterval(() => { void refreshTaskState() }, 2000)
 })
-
 onUnmounted(() => {
+  disposed = true
+  beginTaskMutation()
   if (taskTimer !== undefined) window.clearInterval(taskTimer)
 })
 </script>
@@ -359,17 +395,18 @@ onUnmounted(() => {
     </div>
 
     <el-alert type="info" :closable="false" show-icon :title="migration ? `迁移：新增 ${migration.imported ?? 0} · 重复 ${migration.duplicates ?? 0} · 错误 ${migration.errors ?? 0}；原文件保留只读备份` : '旧 Outlook 文件将在主服务启动时按邮箱幂等迁移；未经 OAuth 与 Graph 验证不会发布。'">
-      <template #default><div class="migration"><span>{{ registrationSummary }} · 代理组 {{ registerStatus?.proxyGroup || '默认组' }} · 可用代理 {{ registerStatus?.proxyCount || 0 }}</span><el-button size="small" @click="migrateLegacy">重复执行迁移</el-button></div></template>
+      <template #default><div class="migration"><span>{{ registrationSummary }} · 代理组 {{ registerStatus?.proxyGroup || '默认组' }} · 可用代理 {{ registerStatus?.proxyCount ?? '—' }}</span><el-button size="small" @click="migrateLegacy">重复执行迁移</el-button></div></template>
     </el-alert>
 
     <el-card shadow="never">
       <template #header><div class="card-header"><strong>Outlook 注册与授权任务</strong><span class="muted">独立于 GPT 任务；按执行模式运行浏览器注册、OAuth/Graph 校验，并将结果写入 MongoDB 邮箱池</span></div></template>
       <div class="task-actions">
-        <el-button type="primary" :loading="registerAction" :disabled="registerStatus?.enabled" @click="runRegisterAction('start')">启动</el-button>
+        <el-button type="primary" :loading="registerAction" :disabled="!registerStatus || registerStatus.enabled || !!taskLoadError" @click="runRegisterAction('start')">启动</el-button>
         <el-button :loading="registerAction" :disabled="!registerStatus?.enabled" @click="runRegisterAction('stop')">停止</el-button>
         <el-button :loading="registerAction" @click="runRegisterAction('reset')">重置</el-button>
-        <span class="muted">状态：{{ registerStatus?.status || 'idle' }} · 日志 {{ registerStatus?.log_count || 0 }} 条</span>
+        <span class="muted">状态：{{ registerStatus?.status || '—' }} · 日志 {{ registerStatus?.log_count ?? '—' }} 条</span>
       </div>
+      <OutlookTaskStatus :snapshot='registerStatus' :load-error='taskLoadError' />
       <p v-if="registerConfigDirty" role="status">有未保存的配置；轮询会保留草稿，启动前请先保存。</p>
       <el-form inline label-width="90px" class="task-config" :disabled="registerAction">
         <el-form-item label="执行模式">

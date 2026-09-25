@@ -36,6 +36,7 @@ export interface OutlookProxy {
 export interface OutlookRegisterStats {
   submitted?: number; succeeded?: number; failed?: number; running?: number
   status?: string; tasks?: number; success_tasks?: number | null
+  success_rate?: number; elapsed_seconds?: number; batch_index?: number; concurrent_flows?: number
 }
 export interface OutlookOAuthConfig {
   enable_oauth2: boolean; redirect_url: string; scopes: string[] | string
@@ -54,6 +55,7 @@ export interface OutlookRegisterConfig {
 export interface OutlookRegisterSnapshot {
   taskId: string; enabled: boolean; status: string; config: OutlookRegisterConfig; stats: OutlookRegisterStats
   failure_stats?: Record<string, number>; result_count?: number; log_count?: number; proxyGroup?: string; proxyCount?: number
+  error?: string | null; startedAt?: string | null; finishedAt?: string | null; updatedAt?: string | null
 }
 
 export interface OutlookPoolStats {

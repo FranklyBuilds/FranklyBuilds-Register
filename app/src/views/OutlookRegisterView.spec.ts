@@ -7,7 +7,7 @@ import OutlookRegisterView from './OutlookRegisterView.vue'
 vi.mock('@/services/outlookGateway', () => ({ outlookGateway: {
   list: vi.fn(), migration: vi.fn(), results: vi.fn(), proxies: vi.fn(), proxyGroups: vi.fn(),
   registerStatus: vi.fn(), registerLogs: vi.fn(), poolStats: vi.fn(), poolAccounts: vi.fn(),
-  oauthCheckConfig: vi.fn(), updateRegisterConfig: vi.fn(), startRegister: vi.fn(),
+  oauthCheckConfig: vi.fn(), updateRegisterConfig: vi.fn(), startRegister: vi.fn(), stopRegister: vi.fn(), resetRegister: vi.fn(),
 } }))
 let config: OutlookRegisterConfig
 let status: OutlookRegisterSnapshot
@@ -113,4 +113,127 @@ it('ignores a pre-save poll that arrives after the save response', async () => {
   await flushPromises()
   expect((input('OAuth 权限范围').element as HTMLTextAreaElement).value).toBe('Mail.Read')
   expect(wrapper!.text()).not.toContain('有未保存的配置')
+})
+it('shows Outlook failure categories and actual runtime counters', async () => {
+  status.status = 'failed'
+  status.error = 'outlook_registration_task_failed'
+  status.stats = { submitted: 3, succeeded: 1, failed: 2, running: 0, success_rate: 33.3, elapsed_seconds: 91, batch_index: 2 }
+  status.failure_stats = { browser_launch_fail: 2, executor_error: 1 }
+  await open()
+  const panel = wrapper!.get('[data-testid=outlook-task-status]')
+  expect(panel.text()).toContain('执行失败')
+  expect(panel.text()).toContain('browser_launch_fail')
+  expect(panel.text()).toContain('executor_error')
+  expect(panel.get('[data-testid=outlook-metric-submitted]').text()).toBe('3')
+  expect(panel.get('[data-testid=outlook-metric-failed]').text()).toBe('2')
+  expect(panel.get('[data-testid=outlook-metric-success-rate]').text()).toBe('33.3%')
+  expect(panel.get('[data-testid=outlook-metric-elapsed]').text()).toBe('1分31秒')
+})
+
+it('polls idle pages so tasks started elsewhere become visible', async () => {
+  await open()
+  status.enabled = true
+  status.status = 'running'
+  status.stats = { submitted: 1, running: 1, succeeded: 0, failed: 0 }
+  poll()
+  await flushPromises()
+  expect(outlookGateway.registerStatus).toHaveBeenCalledTimes(2)
+  expect(wrapper!.get('[data-testid=outlook-metric-running]').text()).toBe('1')
+})
+
+it('shows polling failures without discarding the last snapshot, then recovers', async () => {
+  status.stats = { submitted: 2 }
+  await open()
+  vi.mocked(outlookGateway.registerStatus).mockRejectedValueOnce(new Error('SECRET_FIXTURE_MUST_NOT_RENDER'))
+  poll()
+  await flushPromises()
+  expect(wrapper!.get('[data-testid=outlook-task-stale]').text()).toContain('任务状态刷新失败')
+  expect(wrapper!.get('[data-testid=outlook-metric-submitted]').text()).toBe('2')
+  expect(wrapper!.text()).not.toContain('SECRET_FIXTURE_MUST_NOT_RENDER')
+  expect(button('启动').attributes('disabled')).toBeDefined()
+  status.stats = { submitted: 5 }
+  poll()
+  await flushPromises()
+  expect(wrapper!.find('[data-testid=outlook-task-stale]').exists()).toBe(false)
+  expect(wrapper!.get('[data-testid=outlook-metric-submitted]').text()).toBe('5')
+  expect(button('启动').attributes('disabled')).toBeUndefined()
+})
+
+it('coalesces polling and manual refresh while a task read is pending', async () => {
+  await open()
+  let resolve!: (value: OutlookRegisterSnapshot) => void
+  vi.mocked(outlookGateway.registerStatus).mockReturnValueOnce(new Promise(done => { resolve = done }))
+  poll()
+  poll()
+  await button('刷新').trigger('click')
+  await flushPromises()
+  expect(outlookGateway.registerStatus).toHaveBeenCalledTimes(2)
+  resolve({ ...status, stats: { submitted: 8 } })
+  await flushPromises()
+  expect(wrapper!.get('[data-testid=outlook-metric-submitted]').text()).toBe('8')
+  poll()
+  await flushPromises()
+  expect(outlookGateway.registerStatus).toHaveBeenCalledTimes(3)
+})
+
+it.each([
+  { label: '启动', method: 'startRegister', before: 'idle', after: 'running', count: 1 },
+  { label: '停止', method: 'stopRegister', before: 'running', after: 'stopped', count: 3 },
+  { label: '重置', method: 'resetRegister', before: 'running', after: 'idle', count: 0 },
+] as const)('ignores pre-action status and logs after $label', async ({ label, method, before, after, count }) => {
+  status.status = before
+  status.enabled = before === 'running'
+  await open()
+  let resolve!: (value: OutlookRegisterSnapshot) => void
+  vi.mocked(outlookGateway.registerStatus).mockReturnValueOnce(new Promise(done => { resolve = done }))
+  vi.mocked(outlookGateway.registerLogs).mockResolvedValueOnce({ items: [{ createdAt: '', level: 'info', line: 'OLD_LOG_FIXTURE' }] })
+  poll()
+  await flushPromises()
+  const result = { ...status, status: after, enabled: after === 'running', stats: { submitted: count } }
+  vi.mocked(outlookGateway[method]).mockResolvedValue(result)
+  vi.mocked(outlookGateway.registerLogs).mockResolvedValue({ items: [{ createdAt: '', level: 'info', line: 'CURRENT_LOG_FIXTURE' }] })
+  await button(label).trigger('click')
+  await flushPromises()
+  expect(outlookGateway[method]).toHaveBeenCalledTimes(1)
+  expect(wrapper!.get('[data-testid=outlook-metric-submitted]').text()).toBe(String(count))
+  resolve({ ...status, status: 'running', enabled: true, stats: { submitted: 999 } })
+  await flushPromises()
+  expect(wrapper!.get('[data-testid=outlook-metric-submitted]').text()).toBe(String(count))
+  expect(wrapper!.text()).toContain('CURRENT_LOG_FIXTURE')
+  expect(wrapper!.text()).not.toContain('OLD_LOG_FIXTURE')
+})
+
+it('keeps the applied action visible when its log refresh fails', async () => {
+  status.status = 'running'
+  status.enabled = true
+  await open()
+  vi.mocked(outlookGateway.stopRegister).mockResolvedValue({ ...status, status: 'stopped', enabled: false })
+  vi.mocked(outlookGateway.registerLogs).mockRejectedValueOnce(new Error('logs unavailable'))
+  await button('停止').trigger('click')
+  await flushPromises()
+  expect(wrapper!.get('[data-testid=outlook-task-status]').text()).toContain('已停止')
+  expect(wrapper!.get('[data-testid=outlook-task-stale]').text()).toContain('任务操作已生效，但日志刷新失败')
+})
+
+it('loads task monitoring even when an unrelated account request fails', async () => {
+  vi.mocked(outlookGateway.list).mockRejectedValue(new Error('accounts unavailable'))
+  status.stats = { submitted: 4 }
+  await open()
+  expect(wrapper!.get('[data-testid=outlook-metric-submitted]').text()).toBe('4')
+  expect(wrapper!.find('[data-testid=outlook-task-stale]').exists()).toBe(false)
+})
+
+it('stops polling after unmount and ignores a pending read', async () => {
+  await open()
+  let resolve!: (value: OutlookRegisterSnapshot) => void
+  vi.mocked(outlookGateway.registerStatus).mockReturnValueOnce(new Promise(done => { resolve = done }))
+  poll()
+  wrapper!.unmount()
+  wrapper = undefined
+  expect(window.clearInterval).toHaveBeenCalledWith(123)
+  resolve(status)
+  await flushPromises()
+  poll()
+  await flushPromises()
+  expect(outlookGateway.registerStatus).toHaveBeenCalledTimes(2)
 })
