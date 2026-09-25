@@ -246,6 +246,29 @@ Invoke-WebRequest http://127.0.0.1:8000/api/mailcom/migrate -Method Post
 
 旧的 `3211` 邮箱 URL 仅为迁移/回滚兼容格式。新同步数据使用 `mailcom://account/<id>` 或 `mailcom://alias/<id>` 内部句柄，主流水线不会请求旧端口。
 
+## Outlook 注册与邮箱池集成
+
+Outlook 注册、OAuth/Graph 校验、任务状态、日志、失败统计、代理分组和邮箱池现在都由
+Register 主服务统一管理，控制台入口为 `/outlook-register`，接口位于
+`/api/outlook/*`。Outlook 任务使用独立的 MongoDB 集合，不复用 GPT 任务状态。
+
+任务执行模式：
+
+- `auto`：Mongo 中存在完整 `Client ID + Refresh Token` 时执行授权校验，否则进入浏览器注册引擎。
+- `registration`：只运行现有 Outlook 浏览器注册引擎。
+- `authorized`：只校验 Mongo 中已有 OAuth/Graph 账号。
+- `both`：先执行浏览器注册，再校验已有授权账号。
+
+运行时结果写入 MongoDB 的 `outlook_accounts` 和邮箱池集合；旧
+`app/outlook_register/Results/` 下的 `oauth2.txt`、`registered.txt` 和 `pool.json` 只作为
+迁移/回滚来源，不作为主服务运行时数据源。真实浏览器任务需要 RoxyBrowser、可用的主
+MongoDB 代理分组和受控测试邮箱；未配置可用代理时任务会在启动浏览器前失败，不回退到
+本地默认端口。
+
+普通账号列表、任务日志、统计和邮箱池接口不会返回密码、Client ID、Access Token 或
+Refresh Token。子邮箱接码地址由主服务生成并通过 `/r/<token>` 提供无缓存访问；读取邮件
+时会校验主邮箱或子邮箱收件人，避免跨邮箱读取。
+
 ## 环境变量
 
 复制 `app/.env.example` 后按需配置。常用变量：
