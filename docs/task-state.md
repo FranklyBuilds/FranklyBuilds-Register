@@ -57,7 +57,7 @@
 
 ## 待处理 / 风险
 
-- 当前改动尚未提交，尚未创建或更新 PR。
+- 当前代码已提交到 `92f2aae feat: consolidate Outlook tasks and mailbox pools`；尚未创建或更新 PR。
 - 真实浏览器注册引擎尚未在受控测试账号/代理环境运行；当前 Mongo 代理池为空，不能用生产账号或无代理配置宣称注册链路已验收。
 - 真实 Microsoft OAuth/Graph、IMAP 和 OTP 邮件读取仍未做外部服务验收。
 - `outlook.com` 消费者账号创建仍沿用仓库已有浏览器引擎；本次没有改动其验证码/反滥用行为，也没有为其新增规避逻辑。
@@ -85,4 +85,4 @@
 
 ## 下一步唯一动作
 
-在受控测试环境配置一个非生产 Outlook 测试账号、可用主 Mongo 代理和小任务数，运行 `execution_mode=registration` 的真实浏览器注册；核对任务日志/停止流程、Mongo `outlook_accounts` 与邮箱池写入，以及 `Results` 文件未被运行期修改，再决定提交 PR。
+在受控测试环境配置一个非生产 Outlook 测试账号、可用主 Mongo 代理和小任务数，运行 `execution_mode=registration` 的真实浏览器注册；核对任务日志/停止流程、Mongo `outlook_accounts` 与邮箱池写入，以及 `Results` 文件未被运行期修改，完成受控注册验收后再创建 PR。
