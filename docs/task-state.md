@@ -31,7 +31,7 @@
 - 已将 Outlook 账号管理页切换到主 API；代理清单与分组复用主 Mongo 资源；邮箱池支持 Outlook 来源筛选和分配状态展示。
 - 旧 Outlook 8001 服务未由主启停脚本启动；主服务已提供 Outlook 账号/Graph 管理 API。
 - 已补迁移、OAuth/Graph/OTP 读信模拟、敏感字段隔离、导入幂等、冲突邮箱不接管、GPT 成功分配及邮箱换绑测试。
-- 已补统一适配器模式分流、同步 worker 收尾不自锁、停止期间不被迟到进度重开、日志凭据脱敏、接码子邮箱收件人隔离和邮箱池运行 API 回归测试。
+- 已补统一适配器模式分流、同步 worker 收尾不自锁、停止期间不被迟到进度重开、日志凭据脱敏、接码子邮箱收件人隔离、邮箱池运行 API，以及主任务启动到 Mongo 代理注入的回归测试。
 - Vue 已补执行模式、任务轮询、邮箱池分类/子邮箱生成/批量 OAuth/定时检查/导出/OTP 操作。
 
 ## 进行中
@@ -43,7 +43,7 @@
 
 - 修正 Outlook 注册任务配置/任务集合及 MailCom 迁移集合的 `_id` 索引声明；Mongo 自动维护 `_id` 唯一索引，不能以 `unique=True` 重复创建。新增真实 Mongo 集成回归测试。
 - Outlook 统一适配器已接入主任务：模式分流、账号筛选、OAuth/Graph 校验、Mongo 代理传递、邮箱池发布和独立统计均有模拟测试。
-- 当前 focused Outlook/Mongo API 测试：44 passed；全后端测试：780 passed、14 skipped。
+- 当前 focused Outlook/Mongo API 测试：45 passed；全后端测试：781 passed、14 skipped。
 - 本地 Mongo 集成套件本次结果为 10 passed、2 failed；失败集中在既有 browser-probe 工作区预检/响应夹具，不涉及 Outlook 代码，需另行修复后才能把集成门禁报为全绿。
 - 前端本阶段已执行：Vitest 16 文件/119 项通过，`npm run type-check` 和 `npm run build-only` 通过；生产构建保留主 chunk 超过 500 KB 的非阻断提示。
 - 主服务重启冒烟：`/api/health`、`/api/mailcom/health`、`/api/outlook/register`、Outlook pool stats/accounts、`/launch`、`/mailcom`、`/outlook-register` 均 200；授权模式空候选任务完成且日志显示真实授权执行器，不再显示“适配器未启用”。当前监听仅有 8000，未启动 3211、8001、5173。
@@ -52,7 +52,7 @@
 - 主服务邮箱同步不再主动请求旧 3211；旧 HTTP 句柄仅保留迁移/回滚兼容。
 - 新增服务级测试覆盖 MailCom 导入幂等/脱敏、别名同步、Outlook 独立任务状态/代理组/结果入库。
 - 前端 Vitest：16 个文件、119 项通过（全量验证使用 10 秒测试超时）；type-check/build-only 通过；生产构建仅有主 chunk 超过 500 KB 的非阻断提示。
-- 后端：本次全量 `app/tests/backend` 为 780 passed、14 skipped；Python compileall 和 git diff --check 通过。MailCom 兼容相关测试包含在该结果中。
+- 后端：本次全量 `app/tests/backend` 为 781 passed、14 skipped；Python compileall 和 git diff --check 通过。MailCom 兼容相关测试包含在该结果中。
 - 静态托管冒烟：`/api/health` 200，`/launch`、`/mailcom`、`/outlook-register` 200；未知 `/api/tools/payment-links` POST 404。
 
 ## 待处理 / 风险

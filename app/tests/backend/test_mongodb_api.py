@@ -568,6 +568,66 @@ def test_outlook_registration_engine_bridges_proxy_candidates_and_mongo_result_s
     }]
 
 
+def test_outlook_registration_task_starts_unified_engine_with_mongo_proxy_group() -> None:
+    import copy
+
+    from backend.outlook_register_task_service import OutlookRegisterTaskService
+    from backend.outlook_service import OutlookService, OutlookStore
+
+    manager = _OutlookFakeManager()
+    resources = MongoResourceStore(manager)
+    store = OutlookStore(resources)
+    outlook_service = OutlookService(store)
+    task = OutlookRegisterTaskService(
+        resources,
+        result_sink=store,
+        outlook_service=outlook_service,
+    )
+    captured: list[dict] = []
+
+    def fake_engine(config, control):
+        captured.append(copy.deepcopy(config))
+        control.on_log("[Outlook] fixture 注册引擎已调用")
+        control.on_stats(
+            {"submitted": 1, "running": 0, "succeeded": 1, "failed": 0},
+            {},
+            {"status": "completed", "batch_index": 1},
+        )
+        return {"status": "completed", "submitted": 1, "succeeded": 1, "failed": 0}
+
+    task.adapter.engine = fake_engine
+
+    async def scenario() -> dict:
+        await task.update_config(
+            {
+                "execution_mode": "registration",
+                "tasks": 1,
+                "concurrent_flows": 1,
+                "proxy": {"source": "mongo", "group": "shared"},
+            }
+        )
+        started = await task.start()
+        assert started["status"] == "running"
+        assert started["proxyGroup"] == "shared"
+        assert started["proxyCount"] == 1
+        for _ in range(40):
+            state = await task.status()
+            if state["status"] == "completed":
+                await task.close()
+                return state
+            await asyncio.sleep(0.01)
+        await task.close()
+        raise AssertionError("Outlook task did not reach a terminal state")
+
+    state = asyncio.run(scenario())
+
+    assert state["stats"]["submitted"] == 1
+    assert state["stats"]["succeeded"] == 1
+    assert state["stats"]["failed"] == 0
+    assert captured and captured[0]["execution_mode"] == "registration"
+    assert captured[0]["proxy"]["candidates"][0]["password"] == "SECRET_PROXY"
+
+
 def test_outlook_registration_execution_mode_can_force_authorized_path() -> None:
     from backend.outlook_register_task_service import OutlookRegistrationUnifiedAdapter
 
