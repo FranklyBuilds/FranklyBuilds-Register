@@ -70,4 +70,4 @@
 
 ## 下一步唯一动作
 
-提交当前融合变更的 Git commit，并在需要合并时创建 PR；部署环境随后按真实 Mongo、OAuth/Graph、IMAP 和 Windows 启停验收命令复核。
+在部署环境按真实 Mongo、OAuth/Graph、IMAP 和 Windows 启停验收命令复核；当前代码已提交并关联 PR。
