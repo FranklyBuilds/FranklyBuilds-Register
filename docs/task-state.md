@@ -61,7 +61,7 @@
 
 ## 待处理 / 风险
 
-- 代码已在 `codex/outlook-single-service` 分支并更新现有 PR #5；本轮 reset 元数据修复、disabled fallback 移除和脱敏错误明细包含在待推送提交中。
+- 代码已推送到 `codex/outlook-single-service`，现有 PR #5 已更新且 CI 通过；PR 仍保持 OPEN，等待真实外部注册验收。
 - 真实浏览器注册引擎尚未在受控测试账号/代理环境运行；当前 Mongo 代理池为空，不能用生产账号或无代理配置宣称注册链路已验收。
 - `outlook.com` 消费者账号创建仍沿用仓库已有浏览器引擎；本次没有改动其验证码/反滥用行为，也没有为其新增规避逻辑。
 - 真实 Microsoft OAuth/Graph、IMAP、验证码邮件和外部代理仍需对应环境执行；本地受控探针只证明主服务已调用浏览器引擎并正确记录失败，不能替代真实账号成功验收。
@@ -88,4 +88,4 @@
 
 ## 下一步唯一动作
 
-在受控测试环境配置一个非生产 Outlook 测试账号、可用主 Mongo 代理和小任务数，运行 `execution_mode=registration` 的真实浏览器注册；核对任务日志/停止流程、Mongo `outlook_accounts` 与邮箱池写入，以及 `Results` 文件未被运行期修改，完成受控注册验收后再创建 PR。
+在受控测试环境配置一个非生产 Outlook 测试账号、可用主 Mongo 代理和小任务数，运行 `execution_mode=registration` 的真实浏览器注册；核对任务日志/停止流程、Mongo `outlook_accounts` 与邮箱池写入，以及 `Results` 文件未被运行期修改，完成受控注册验收后更新 PR #5 的验收证据，再决定合并。
