@@ -32,6 +32,7 @@
 - 旧 Outlook 8001 服务未由主启停脚本启动；主服务已提供 Outlook 账号/Graph 管理 API。
 - 已补迁移、OAuth/Graph/OTP 读信模拟、敏感字段隔离、导入幂等、冲突邮箱不接管、GPT 成功分配、邮箱换绑，以及 Mongo browser-probe 集成夹具测试。
 - 已补统一适配器模式分流、同步 worker 收尾不自锁、停止期间不被迟到进度重开、日志凭据脱敏、接码子邮箱收件人隔离、邮箱池运行 API，以及主任务启动到 Mongo 代理注入的回归测试。
+- 已移除无依赖时的生命周期-only disabled fallback；独立构造 `OutlookRegisterTaskService` 也会自动接入统一执行适配器，避免误报“仅完成任务生命周期检查”。
 - Vue 已补执行模式、任务轮询、邮箱池分类/子邮箱生成/批量 OAuth/定时检查/导出/OTP 操作。
 
 ## 进行中
@@ -59,7 +60,7 @@
 
 ## 待处理 / 风险
 
-- 代码已在 `codex/outlook-single-service` 分支并更新现有 PR #5；本轮 reset 生命周期修复尚未提交。
+- 代码已在 `codex/outlook-single-service` 分支并更新现有 PR #5；本轮 reset 元数据修复和 disabled fallback 移除包含在待推送提交中。
 - 真实浏览器注册引擎尚未在受控测试账号/代理环境运行；当前 Mongo 代理池为空，不能用生产账号或无代理配置宣称注册链路已验收。
 - `outlook.com` 消费者账号创建仍沿用仓库已有浏览器引擎；本次没有改动其验证码/反滥用行为，也没有为其新增规避逻辑。
 - 真实 Microsoft OAuth/Graph、IMAP、验证码邮件和外部代理仍需对应环境执行；本地受控探针只证明主服务已调用浏览器引擎并正确记录失败，不能替代真实账号成功验收。

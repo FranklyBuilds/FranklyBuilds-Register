@@ -26,12 +26,6 @@ from .resource_service import MongoResourceStore, utc_now
 TASK_ID = "outlook-register"
 ACTIVE_STATUSES = {"running", "stopping"}
 STOP_TIMEOUT_SECONDS = 5
-DEFAULT_FAILURE_STATS = {
-    "adapter_disabled": 0,
-    "executor_error": 0,
-}
-
-
 def _redact_outlook_log(value: Any) -> str:
     """Keep task logs useful without persisting account/proxy credentials."""
     text = str(value or "")
@@ -133,15 +127,6 @@ def _empty_stats(config: Mapping[str, Any] | None = None) -> dict[str, Any]:
 
 class OutlookRegistrationAdapter(Protocol):
     def __call__(self, config: dict[str, Any], control: "OutlookTaskControl") -> Mapping[str, Any] | None: ...
-
-
-class OutlookRegistrationDisabled:
-    """Default adapter: lifecycle smoke-test only, no external registration."""
-
-    def __call__(self, _config: dict[str, Any], control: "OutlookTaskControl") -> Mapping[str, Any]:
-        control.on_log("[Outlook] 注册执行适配器未启用；仅完成任务生命周期检查", "WARN")
-        control.on_stats({}, {"adapter_disabled": 1}, {"status": "disabled"})
-        return {"status": "disabled", "reason": "registration_adapter_disabled"}
 
 
 class OutlookRegistrationEngineAdapter:
@@ -509,13 +494,18 @@ class OutlookRegisterTaskService:
     ) -> None:
         self.resources = resources
         self.manager = resources.manager
-        self.adapter = adapter or (
-            OutlookRegistrationUnifiedAdapter(result_sink, outlook_service)
-            if result_sink is not None and outlook_service is not None
-            else OutlookAuthorizedAccountAdapter(outlook_service)
-            if outlook_service is not None
-            else OutlookRegistrationDisabled()
-        )
+        if adapter is None:
+            # The main service passes these dependencies explicitly.  Keep the
+            # standalone constructor equally functional instead of silently
+            # falling back to a lifecycle-only task that never executes Outlook.
+            from .outlook_service import OutlookService, OutlookStore
+
+            if result_sink is None:
+                result_sink = OutlookStore(resources)
+            if outlook_service is None:
+                outlook_service = OutlookService(result_sink)
+            adapter = OutlookRegistrationUnifiedAdapter(result_sink, outlook_service)
+        self.adapter = adapter
         self.result_sink = result_sink
         self._thread: threading.Thread | None = None
         self._async_task: asyncio.Task[Any] | None = None

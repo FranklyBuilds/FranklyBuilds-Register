@@ -412,6 +412,8 @@ def test_outlook_and_mailcom_use_implicit_mongodb_id_indexes() -> None:
     manager = _OutlookFakeManager()
     resources = MongoResourceStore(manager)
     outlook_tasks = OutlookRegisterTaskService(resources)
+    from backend.outlook_register_task_service import OutlookRegistrationUnifiedAdapter
+    assert isinstance(outlook_tasks.adapter, OutlookRegistrationUnifiedAdapter)
     mailcom = MailComService(resources, cipher=_TestCipher(), sqlite_path=Path("missing.db"))
 
     async def scenario() -> None:
