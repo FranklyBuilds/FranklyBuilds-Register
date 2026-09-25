@@ -5,6 +5,7 @@ import json
 import re
 import shutil
 import stat
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -140,6 +141,28 @@ class OutlookStore:
             }
             for item in documents
         ]
+
+    async def registration_candidates(self, *, limit: int = 500) -> list[dict[str, Any]]:
+        """Return credential-bearing accounts for the internal task worker."""
+        bounded_limit = max(1, min(int(limit), 5000))
+        cursor = (
+            self.accounts.find(
+                {
+                    "clientId": {"$exists": True, "$nin": [""]},
+                    "refreshToken": {"$exists": True, "$nin": [""]},
+                },
+                {
+                    "email": 1,
+                    "clientId": 1,
+                    "refreshToken": 1,
+                    "oauthStatus": 1,
+                    "graphStatus": 1,
+                },
+            )
+            .sort("updatedAt", 1)
+            .limit(bounded_limit)
+        )
+        return await self.resources._guard(cursor.to_list(length=bounded_limit))
 
     async def list_accounts(
         self,
@@ -444,12 +467,35 @@ class OutlookService:
         self.store = store
         self.http_client_factory = http_client_factory
 
-    async def _refresh(self, account: dict[str, Any]) -> dict[str, Any]:
+    @staticmethod
+    def _proxy_url(proxy: Mapping[str, Any] | None = None) -> str | None:
+        if not proxy:
+            return None
+        scheme = str(proxy.get("scheme") or "http").strip().lower()
+        if scheme == "socks5h":
+            scheme = "socks5"
+        host = str(proxy.get("host") or "").strip()
+        try:
+            port = int(proxy.get("port") or 0)
+        except (TypeError, ValueError):
+            port = 0
+        if not host or not 1 <= port <= 65535:
+            return None
+        username = quote(str(proxy.get("username") or ""), safe="")
+        password = quote(str(proxy.get("password") or ""), safe="")
+        auth = f"{username}:{password}@" if username or password else ""
+        return f"{scheme}://{auth}{host}:{port}"
+
+    async def _refresh(self, account: dict[str, Any], *, proxy: Mapping[str, Any] | None = None) -> dict[str, Any]:
         refresh = str(account.get("refreshToken") or "")
         client_id = str(account.get("clientId") or "")
         if not refresh or not client_id:
             raise PermissionError("missing")
-        async with self.http_client_factory(timeout=25, trust_env=False) as client:
+        client_options: dict[str, Any] = {"timeout": 25, "trust_env": False}
+        proxy_url = self._proxy_url(proxy)
+        if proxy_url:
+            client_options["proxy"] = proxy_url
+        async with self.http_client_factory(**client_options) as client:
             response = await client.post(TOKEN_URL, data={
                 "client_id": client_id,
                 "grant_type": "refresh_token",
@@ -466,8 +512,12 @@ class OutlookService:
             raise PermissionError(status)
         return {"access_token": str(payload["access_token"]), "refresh_token": str(payload.get("refresh_token") or refresh)}
 
-    async def _graph_get(self, path: str, token: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
-        async with self.http_client_factory(timeout=25, trust_env=False) as client:
+    async def _graph_get(self, path: str, token: str, params: dict[str, Any] | None = None, *, proxy: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        client_options: dict[str, Any] = {"timeout": 25, "trust_env": False}
+        proxy_url = self._proxy_url(proxy)
+        if proxy_url:
+            client_options["proxy"] = proxy_url
+        async with self.http_client_factory(**client_options) as client:
             response = await client.get(
                 f"{GRAPH_BASE}{path}",
                 headers={"Authorization": f"Bearer {token}", "Prefer": "outlook.body-content-type='text'"},
@@ -480,10 +530,10 @@ class OutlookService:
         payload = response.json()
         return payload if isinstance(payload, dict) else {}
 
-    async def check_oauth(self, account_id: str) -> dict[str, Any]:
+    async def check_oauth(self, account_id: str, *, proxy: Mapping[str, Any] | None = None) -> dict[str, Any]:
         account = await self.store.get(account_id)
         try:
-            tokens = await self._refresh(account)
+            tokens = await self._refresh(account, proxy=proxy)
         except PermissionError as exc:
             status = str(exc) if str(exc) in {"expired", "error"} else "error"
             message = "OAuth token expired" if status == "expired" else "OAuth refresh failed"
@@ -514,10 +564,10 @@ class OutlookService:
             "poolStatus": str(mailbox.get("status")) if mailbox else "not_published",
         }
 
-    async def check_graph(self, account_id: str) -> dict[str, Any]:
+    async def check_graph(self, account_id: str, *, proxy: Mapping[str, Any] | None = None) -> dict[str, Any]:
         account = await self.store.get(account_id)
         try:
-            tokens = await self._refresh(account)
+            tokens = await self._refresh(account, proxy=proxy)
         except PermissionError as exc:
             oauth_status = "expired" if str(exc) == "expired" else "error"
             message = "OAuth token expired" if oauth_status == "expired" else "OAuth refresh failed"
@@ -540,7 +590,7 @@ class OutlookService:
 
         try:
             identity = await self._graph_get(
-                "/me", tokens["access_token"], {"$select": "id,mail,userPrincipalName"}
+                "/me", tokens["access_token"], {"$select": "id,mail,userPrincipalName"}, proxy=proxy
             )
             addresses = {
                 normalize_email(str(identity.get(field) or ""))

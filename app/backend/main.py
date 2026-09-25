@@ -225,7 +225,11 @@ def create_app(
     resource_service = ResourceService(resource_store)
     outlook_store = OutlookStore(resource_store)
     outlook_service = OutlookService(outlook_store)
-    outlook_register_tasks = OutlookRegisterTaskService(resource_store, result_sink=outlook_store)
+    outlook_register_tasks = OutlookRegisterTaskService(
+        resource_store,
+        result_sink=outlook_store,
+        outlook_service=outlook_service,
+    )
     mailcom_service = MailComService(resource_store)
     proxy_subscription_service = ProxySubscriptionService(resource_service)
     proxy_health_scheduler = ProxyHealthScheduler(proxy_subscription_service)

@@ -183,7 +183,7 @@ class MailComService:
         await self.resources._guard(self.accounts.create_index([("emailNormalized", 1)], unique=True, name="mailcom_account_email"))
         await self.resources._guard(self.aliases.create_index([("emailNormalized", 1)], unique=True, name="mailcom_alias_email"))
         await self.resources._guard(self.aliases.create_index([("accountId", 1)], name="mailcom_alias_account"))
-        await self.resources._guard(self.migrations.create_index([("_id", 1)], unique=True, name="mailcom_migration_id"))
+        await self.resources._guard(self.migrations.create_index("_id", name="mailcom_migration_id"))
 
     def _get_cipher(self) -> CredentialCipher:
         if self.cipher is None:

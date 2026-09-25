@@ -58,6 +58,26 @@ def mongo_client(tmp_path: Path):
         sync_client.close()
 
 
+def test_outlook_mailcom_startup_indexes_work_with_local_mongodb(tmp_path: Path) -> None:
+    database = f"autoregister_test_{uuid4().hex}"
+    manager = MongoManager(uri=MONGO_URI, database_name=database)
+    app = create_app(
+        settings_path=tmp_path / "settings.json",
+        log_dir=tmp_path / "logs",
+        mongo_manager=manager,
+    )
+    with TestClient(app) as client:
+        assert client.get("/api/health").json()["mongodb"]["status"] == "online"
+        assert client.get("/api/mailcom/health").status_code == 200
+        assert client.get("/api/outlook/register").status_code == 200
+        assert client.get("/api/mailcom/accounts").status_code == 200
+    with MongoClient(MONGO_URI, serverSelectionTimeoutMS=2000) as sync_client:
+        assert sync_client[database]["outlook_register_config"].index_information()
+        assert sync_client[database]["outlook_register_tasks"].index_information()
+        assert sync_client[database]["mailcom_migrations"].index_information()
+        sync_client.drop_database(database)
+
+
 def import_emails(client: TestClient, count: int) -> None:
     raw = "\n".join(
         f"queue.{index}@example.com----https://example.com/s/token-{index}/queue.{index}@example.com"

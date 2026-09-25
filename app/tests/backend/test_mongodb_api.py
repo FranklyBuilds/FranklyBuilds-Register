@@ -286,6 +286,7 @@ class _OutlookFakeCollection:
     def __init__(self, rows=()):
         import copy
         self.rows = {str(row["_id"]): copy.deepcopy(row) for row in rows}
+        self.index_calls = []
     def _match(self, row, query):
         for key, expected in query.items():
             if key in ("$or", "$and"):
@@ -314,7 +315,9 @@ class _OutlookFakeCollection:
         for key, value in projection.items():
             if not value: result.pop(key, None)
         return result
-    async def create_index(self, *_args, **_kwargs): return "fake-index"
+    async def create_index(self, keys, **options):
+        self.index_calls.append((keys, options))
+        return "fake-index"
     async def count_documents(self, query): return sum(self._match(row, query) for row in self.rows.values())
     def find(self, query, projection=None): return _OutlookFakeCursor([self._project(row, projection) for row in self.rows.values() if self._match(row, query)])
     async def find_one(self, query, projection=None):
@@ -394,6 +397,31 @@ def test_mailcom_api_import_is_idempotent_and_redacts_credentials(tmp_path: Path
     email_rows = manager.database["emails"].rows
     synced_alias = next(row for row in email_rows.values() if row.get("email") == "alias@mail.test")
     assert synced_alias["accessUrl"].startswith("mailcom://alias/")
+
+
+def test_outlook_and_mailcom_use_implicit_mongodb_id_indexes() -> None:
+    from backend.mailcom_service import MailComService
+    from backend.outlook_register_task_service import OutlookRegisterTaskService
+
+    manager = _OutlookFakeManager()
+    resources = MongoResourceStore(manager)
+    outlook_tasks = OutlookRegisterTaskService(resources)
+    mailcom = MailComService(resources, cipher=_TestCipher(), sqlite_path=Path("missing.db"))
+
+    async def scenario() -> None:
+        await outlook_tasks.ensure_indexes()
+        await mailcom.ensure_indexes()
+
+    asyncio.run(scenario())
+
+    indexes = manager.database["outlook_register_config"].index_calls
+    assert indexes == [("_id", {"name": "outlook_register_config_id"})]
+    assert manager.database["outlook_register_tasks"].index_calls == [
+        ("_id", {"name": "outlook_register_task_id"})
+    ]
+    assert manager.database["mailcom_migrations"].index_calls == [
+        ("_id", {"name": "mailcom_migration_id"})
+    ]
 
 
 def test_outlook_register_task_uses_independent_state_and_mongo_proxy_group(tmp_path: Path) -> None:
@@ -1149,6 +1177,60 @@ def test_outlook_graph_and_mailbox_apis_use_mock_transport_and_gate_publication(
     mismatch = client.post("/api/outlook/accounts/bad/check-graph")
     assert mismatch.status_code == 200 and mismatch.json()["graphStatus"] == "error"
     assert "bad" not in manager.database["emails"].rows
+
+
+def test_outlook_register_task_runs_authorized_accounts_through_main_service(tmp_path: Path) -> None:
+    import time
+    import httpx
+
+    manager = _OutlookFakeManager()
+    app = create_app(settings_path=tmp_path / "settings.json", log_dir=tmp_path / "logs", mongo_manager=manager)
+    requests: list[httpx.Request] = []
+    client_options: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.host == "login.microsoftonline.com":
+            return httpx.Response(200, json={"access_token": "TASK_ACCESS", "refresh_token": "TASK_REFRESH"})
+        if request.url.path.endswith("/me"):
+            return httpx.Response(200, json={"id": "task-user", "mail": "me@outlook.test", "userPrincipalName": "me@outlook.test"})
+        return httpx.Response(404)
+
+    real_client = httpx.AsyncClient
+
+    def factory(**kwargs):
+        client_options.append(dict(kwargs))
+        # MockTransport does not route through httpx's proxy transport; retain
+        # the option for the assertion while keeping this test offline.
+        kwargs.pop("proxy", None)
+        return real_client(transport=httpx.MockTransport(handler), **kwargs)
+
+    app.state.outlook_service.http_client_factory = factory
+    with TestClient(app) as client:
+        saved = client.put("/api/outlook/register", json={"tasks": 1, "proxy": {"group": "shared"}})
+        assert saved.status_code == 200
+        started = client.post("/api/outlook/register/start")
+        assert started.status_code == 202
+        for _ in range(50):
+            status = client.get("/api/outlook/register").json()
+            if status["status"] == "completed":
+                break
+            time.sleep(0.02)
+        else:
+            raise AssertionError(status)
+
+        assert status["stats"]["submitted"] == 1
+        assert status["stats"]["succeeded"] == 1
+        assert status["stats"]["failed"] == 0
+        assert status["failure_stats"] == {}
+        account = manager.database["outlook_accounts"].rows["outlook1"]
+        assert account["oauthStatus"] == "ok"
+        assert account["graphStatus"] == "ok"
+        assert manager.database["emails"].rows["outlook:outlook1"]["status"] == "available"
+        assert any(options.get("proxy") == "http://SECRET_USER:SECRET_PROXY@proxy.example.test:8080" for options in client_options)
+        logs = client.get("/api/outlook/register/logs").json()["items"]
+        assert any("授权账号执行器已启用" in item["line"] for item in logs)
+        assert all(secret not in client.get("/api/outlook/register").text for secret in ("SECRET_USER", "SECRET_PROXY", "TASK_REFRESH", "TASK_ACCESS"))
 
 
 def test_outlook_mailbox_client_reads_graph_mail_for_otp_polling() -> None:

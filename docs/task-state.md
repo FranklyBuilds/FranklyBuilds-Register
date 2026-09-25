@@ -17,7 +17,7 @@
 
 ## 当前阶段
 
-PR 审核修复已完成，待推送后由最新 CI 复核；真实外部服务验收按环境条件保留为部署后操作。
+Outlook 主服务任务已从“仅生命周期检查”切换为 Mongo 授权账号执行器：任务在主事件循环内逐个执行 OAuth/Graph 校验，使用配置的 Mongo 代理组，将通过校验的账号发布到主邮箱池，并持久化进度、日志和失败统计。
 
 ## 已完成
 
@@ -33,9 +33,13 @@ PR 审核修复已完成，待推送后由最新 CI 复核；真实外部服务�
 
 ## 进行中
 
-- 推送 PR 审核修复并等待最新 CI；真实 Microsoft OAuth/Graph、真实 MongoDB、真实 IMAP 和 Windows 本机端到端冒烟仍需在具备对应外部服务的环境执行。
+- 用户正在预览集成控制台；授权账号任务已完成离线 Graph 模拟验收。真实 Microsoft OAuth/Graph、真实 IMAP 仍需对应外部服务环境执行。
 
 ## 已验证的本阶段结果
+
+- 修正 Outlook 注册任务配置/任务集合及 MailCom 迁移集合的 `_id` 索引声明；Mongo 自动维护 `_id` 唯一索引，不能以 `unique=True` 重复创建。新增真实 Mongo 集成回归测试。
+- Outlook 授权账号执行器已接入主任务：账号筛选、OAuth/Graph 校验、Mongo 代理传递、邮箱池发布和独立统计均有端到端模拟测试。
+- 使用本机 MongoDB 独立测试库跑融合服务生命周期，Outlook/MailCom 接口返回成功且索引创建完成；生产入口重启后 `/api/health`、`/api/mailcom/health`、Outlook 任务状态与 MailCom 账号接口均返回成功。
 
 - MailCom Mongo service、内部 `mailcom://account|alias` 句柄、SQLite 只读备份/副本迁移和主服务 DPAPI 前缀重加密已落地。
 - 主服务邮箱同步不再主动请求旧 3211；旧 HTTP 句柄仅保留迁移/回滚兼容。
@@ -46,9 +50,11 @@ PR 审核修复已完成，待推送后由最新 CI 复核；真实外部服务�
 
 ## 待处理 / 风险
 
+- 本次运行期索引修复尚未提交。
+
 - 尚未在当前环境执行真实 Microsoft OAuth/Graph、真实 MongoDB、真实 IMAP 和真实 Windows 进程启停；已完成离线模拟与静态托管冒烟，部署时需按验收命令执行。
 - 生产前端主 chunk 约 800 KB；构建成功，本任务不做无关分包改造。
-- 真实 Outlook 注册执行适配器未启用；当前交付的是独立任务管理、Mongo 结果接收和可插拔适配器边界，不扩展第三方平台注册/反滥用流程。
+- `outlook.com` 消费者账号创建执行器未纳入主服务；当前任务执行器处理已导入且已授权账号的 OAuth/Graph/OTP/邮箱池链路。若目标改为自有 Microsoft Entra 租户，需要另接 Graph 用户 provisioning。
 - 后端测试仍有一个既有测试夹具的 coroutine 未 await 警告，不影响 767 项通过结果。
 
 ## 决策记录
@@ -70,4 +76,4 @@ PR 审核修复已完成，待推送后由最新 CI 复核；真实外部服务�
 
 ## 下一步唯一动作
 
-提交并推送 PR 审核修复，等待最新 CI 通过后复核 mergeability 并合并；部署环境再按真实 Mongo、OAuth/Graph、IMAP 和 Windows 启停验收命令复核。
+重启主服务加载授权账号执行器，并在控制台导入一个测试授权账号后启动任务；随后按真实 OAuth/Graph 环境复核结果和邮箱池状态。

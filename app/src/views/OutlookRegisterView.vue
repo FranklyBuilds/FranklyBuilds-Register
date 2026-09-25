@@ -208,7 +208,7 @@ onMounted(() => void refresh())
     </el-alert>
 
     <el-card shadow="never">
-      <template #header><div class="card-header"><strong>Outlook 注册任务</strong><span class="muted">独立于 GPT 任务，状态、日志和失败统计持久化到 MongoDB</span></div></template>
+      <template #header><div class="card-header"><strong>Outlook 授权账号任务</strong><span class="muted">独立于 GPT 任务；处理主 MongoDB 中已有授权账号，执行 OAuth/Graph 校验并发布邮箱池</span></div></template>
       <div class="task-actions">
         <el-button type="primary" :loading="registerAction" :disabled="registerStatus?.enabled" @click="runRegisterAction('start')">启动</el-button>
         <el-button :loading="registerAction" :disabled="!registerStatus?.enabled" @click="runRegisterAction('stop')">停止</el-button>
