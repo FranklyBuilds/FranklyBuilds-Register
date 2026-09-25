@@ -27,7 +27,7 @@ from .payment_extractor_service import (
 )
 from .oai_payment_extractor.config import SUPPORTED_COUNTRIES
 from .paypal_agreement_service import PaypalAgreementService
-from .paid_mail_service import PaidMailCheckError, check_paid_confirmation
+from .paid_mail_service import PaidMailCheckError, PaidMailCheckResult, check_paid_confirmation
 from .resource_service import MongoResourceStore, normalize_country_code
 
 
@@ -297,6 +297,7 @@ class AccountPipelineService:
         agreement: PaypalAgreementService,
         hero_sms: HeroSmsClient | None = None,
         mail_checker: Any = check_paid_confirmation,
+        mailcom_service: Any | None = None,
         *,
         poll_seconds: float = 1.5,
     ) -> None:
@@ -306,6 +307,7 @@ class AccountPipelineService:
         self.agreement = agreement
         self.hero_sms = hero_sms or HeroSmsClient()
         self.mail_checker = mail_checker
+        self.mailcom_service = mailcom_service
         self.poll_seconds = max(0.25, poll_seconds)
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
@@ -313,6 +315,31 @@ class AccountPipelineService:
         self._agreement_hero_tasks: set[asyncio.Task[None]] = set()
         self._sms_receiver_tasks: set[asyncio.Task[None]] = set()
         self._sms_receiver_submit_lock = asyncio.Lock()
+
+    async def _check_mail_confirmation(self, url: str, email: str, paid_at: datetime) -> PaidMailCheckResult:
+        """Use the in-process MailCom service for internal handles.
+
+        Legacy HTTP/HTML mailbox URLs keep the injected checker for compatibility;
+        new ``mailcom://`` handles never depend on the retired 3211 service.
+        """
+        if urlsplit(url).scheme.casefold() != "mailcom":
+            return await asyncio.to_thread(self.mail_checker, url, email, paid_at)
+        if self.mailcom_service is None:
+            raise PaidMailCheckError("mailcom_service_unavailable")
+        result = await self.mailcom_service.payment_confirmation(email, paid_at)
+        received_at = result.get("receivedAt")
+        if isinstance(received_at, str):
+            try:
+                received_at = datetime.fromisoformat(received_at.replace("Z", "+00:00"))
+            except ValueError:
+                received_at = None
+        return PaidMailCheckResult(
+            status="confirmed" if result.get("status") == "confirmed" else "waiting",
+            subject=str(result.get("subject") or ""),
+            received_at=received_at if isinstance(received_at, datetime) else None,
+            error_code=None if result.get("found") else "not_found",
+            order_id=str(result.get("orderId") or "") or None,
+        )
 
     @property
     def items(self) -> Any:
@@ -2244,8 +2271,7 @@ class AccountPipelineService:
             else:
                 try:
                     async with semaphore:
-                        result = await asyncio.to_thread(
-                            self.mail_checker,
+                        result = await self._check_mail_confirmation(
                             url,
                             str(item.get("email") or ""),
                             paid_at,
@@ -2395,8 +2421,7 @@ class AccountPipelineService:
             else:
                 try:
                     async with semaphore:
-                        result = await asyncio.to_thread(
-                            self.mail_checker,
+                        result = await self._check_mail_confirmation(
                             url,
                             str(item.get("email") or ""),
                             paid_at,

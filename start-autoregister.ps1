@@ -1,5 +1,5 @@
 param(
-    [switch] $SkipMailCom,
+    [switch] $Development,
     [switch] $NoBrowser,
     [switch] $Restart
 )
@@ -12,7 +12,6 @@ $Python = Join-Path $Root 'register_env\Scripts\python.exe'
 $settingsPath = Join-Path $Root 'data\settings.json'
 $RuntimeLogs = Join-Path $Root 'data\runtime'
 $RuntimePids = Join-Path $RuntimeLogs 'pids'
-$MailComStart = Join-Path $Root 'mailcom-manager\start.ps1'
 $AppEnv = Join-Path $App '.env'
 $ProjectBase = Split-Path -Parent (Split-Path -Parent $Root)
 $EasyProxiesRoot = if ($env:EASY_PROXIES_ROOT) {
@@ -131,8 +130,8 @@ if (-not (Test-Path -LiteralPath $AppEnv)) {
 if (-not (Test-Path -LiteralPath $Python)) {
     throw "Python environment not found. Run app\setup.ps1 first: $Python"
 }
-if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) {
-    throw 'npm.cmd was not found. Install Node.js before starting the frontend.'
+if ($Development -and -not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) {
+    throw 'npm.cmd was not found. Install Node.js to run Vite development mode.'
 }
 
 Start-Component 'Easy Proxies' {
@@ -241,36 +240,34 @@ Start-Component 'Backend' {
     }
 }
 
-Start-Component 'Frontend' {
-    if (Test-LocalPort 5173) {
-        Write-Host '  already running' -ForegroundColor Green
-    } else {
-        $process = Start-Process -FilePath 'npm.cmd' `
-            -ArgumentList 'run', 'dev', '--', '--configLoader', 'native', '--host', '127.0.0.1' `
-            -WorkingDirectory $App -WindowStyle Hidden -PassThru `
-            -RedirectStandardOutput (Join-Path $RuntimeLogs 'autoregister-frontend.out.log') `
-            -RedirectStandardError (Join-Path $RuntimeLogs 'autoregister-frontend.err.log')
-        Confirm-Started 'Frontend' $process 5173 (Join-Path $RuntimeLogs 'autoregister-frontend.err.log') 30
-        Save-ProcessId 'frontend' $process
-    }
-}
-
-if (-not $SkipMailCom) {
-    Start-Component 'MailCom' {
-        if (Test-LocalPort 3211) {
-            Write-Host '  already running' -ForegroundColor Green
-        } elseif (Test-Path -LiteralPath $MailComStart) {
-            & $MailComStart -NoBrowser
+if ($Development) {
+    Start-Component 'Vite development frontend' {
+        if (Test-LocalPort 5173) {
+            Write-Host '  already running on 127.0.0.1:5173' -ForegroundColor Green
         } else {
-            Write-Host '  manager is not installed; non-MailCom mailboxes remain available' -ForegroundColor Yellow
+            $process = Start-Process -FilePath 'npm.cmd' `
+                -ArgumentList 'run', 'dev', '--', '--configLoader', 'native', '--host', '127.0.0.1' `
+                -WorkingDirectory $App -WindowStyle Hidden -PassThru `
+                -RedirectStandardOutput (Join-Path $RuntimeLogs 'autoregister-frontend.out.log') `
+                -RedirectStandardError (Join-Path $RuntimeLogs 'autoregister-frontend.err.log')
+            Confirm-Started 'Frontend' $process 5173 (Join-Path $RuntimeLogs 'autoregister-frontend.err.log') 30
+            Save-ProcessId 'frontend' $process
         }
     }
+} elseif (-not (Test-Path -LiteralPath (Join-Path $App 'dist\index.html'))) {
+    throw 'Production Vue bundle is missing. Run npm.cmd run build-only from app or start with -Development.'
 }
-
 Write-Host ''
 Write-Host 'FranklyBuilds-Register (FB注册机) started:' -ForegroundColor Green
-Write-Host '  Page: http://127.0.0.1:5173/launch'
+if ($Development) {
+    Write-Host '  Mode: development (Vite + FastAPI)'
+    Write-Host '  Page: http://127.0.0.1:5173/launch'
+} else {
+    Write-Host '  Mode: production/local use (FastAPI serves Vue bundle)'
+    Write-Host '  Page: http://127.0.0.1:8000/launch'
+}
 Write-Host '  Backend: http://127.0.0.1:8000'
+Write-Host '  MailCom: integrated in the main service; no separate 3211 process is started'
 Write-Host '  Roxy API: http://127.0.0.1:50000 (enable it in Roxy first)'
 Write-Host '  Embedded browser proxy bridge: starts per profile on a temporary loopback port'
 Write-Host '  Legacy local mixed proxy 7890: optional; only used when that compatibility group is selected'
@@ -280,32 +277,19 @@ if (Test-LocalPort 7890) {
     Write-Host '  Legacy local proxy: not running (optional; direct imported HTTP/SOCKS nodes remain available)' -ForegroundColor DarkYellow
 }
 
-if (-not $NoBrowser -and (Test-LocalPort 5173)) {
-    Start-Process 'http://127.0.0.1:5173/launch'
-}
-if (-not $SkipMailCom) {
-    Write-Host '  MailCom: http://127.0.0.1:3211'
+if (-not $NoBrowser) {
+    $pageUrl = if ($Development) { 'http://127.0.0.1:5173/launch' } else { 'http://127.0.0.1:8000/launch' }
+    Start-Process $pageUrl
 }
 
 try {
-    $health = Invoke-RestMethod -Uri 'http://127.0.0.1:8000/api/health' -TimeoutSec 5
-    Write-Host "  Backend status: $($health.status)" -ForegroundColor Green
-} catch {
-    Write-Host '  Backend is still starting; refresh in a few seconds.' -ForegroundColor Yellow
-}
-
-try {
-    $null = Invoke-WebRequest -Uri 'http://127.0.0.1:5173/launch' -UseBasicParsing -TimeoutSec 5
-    Write-Host '  Frontend status: ready' -ForegroundColor Green
-} catch {
-    Write-Host "  Frontend is still starting; check $RuntimeLogs\autoregister-frontend.err.log" -ForegroundColor Yellow
-}
-
-if (-not $SkipMailCom) {
-    try {
-        $mailHealth = Invoke-RestMethod -Uri 'http://127.0.0.1:3211/api/health' -TimeoutSec 5
-        Write-Host "  MailCom status: $($mailHealth.status)" -ForegroundColor Green
-    } catch {
-        Write-Host '  MailCom is still starting; registration can use other mailbox sources.' -ForegroundColor Yellow
+    if ($Development) {
+        $null = Invoke-WebRequest -Uri 'http://127.0.0.1:5173/launch' -UseBasicParsing -TimeoutSec 5
+        Write-Host '  Vite status: ready' -ForegroundColor Green
+    } else {
+        $null = Invoke-WebRequest -Uri 'http://127.0.0.1:8000/launch' -UseBasicParsing -TimeoutSec 5
+        Write-Host '  Console status: ready from FastAPI' -ForegroundColor Green
     }
+} catch {
+    Write-Host '  Console is still starting; check the backend error log.' -ForegroundColor Yellow
 }

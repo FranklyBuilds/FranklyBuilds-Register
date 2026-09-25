@@ -68,6 +68,12 @@ const router = createRouter({
       meta: { title: 'Outlook 账号管理' },
     },
     {
+      path: '/mailcom',
+      name: 'mailcom',
+      component: () => import('@/views/MailComView.vue'),
+      meta: { title: 'MailCom 管理' },
+    },
+    {
       path: '/:pathMatch(.*)*',
       redirect: '/launch',
     },

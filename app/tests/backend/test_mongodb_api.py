@@ -368,6 +368,116 @@ async def run_migration_twice(store, migration):
     return first, second
 
 
+def test_mailcom_api_import_is_idempotent_and_redacts_credentials(tmp_path: Path) -> None:
+    from backend.mailcom_service import MailComService
+
+    manager = _OutlookFakeManager()
+    app = create_app(settings_path=tmp_path / "settings.json", log_dir=tmp_path / "logs", mongo_manager=manager)
+    client = TestClient(app)
+    app.state.mailcom_service.cipher = _TestCipher()
+
+    payload = {"rawText": "owner@mail.test----clear-secret\nalso@mail.test----other-secret"}
+    first = client.post("/api/mailcom/accounts/import", json=payload)
+    second = client.post("/api/mailcom/accounts/import", json=payload)
+    listed = client.get("/api/mailcom/accounts")
+
+    assert first.status_code == 200
+    assert first.json() == {"total": 2, "imported": 2, "duplicateCount": 0, "errorCount": 0}
+    assert second.json() == {"total": 2, "imported": 0, "duplicateCount": 2, "errorCount": 0}
+    assert "clear-secret" not in listed.text and "passwordEncrypted" not in listed.text
+    assert "other-secret" not in listed.text
+    account = listed.json()["items"][0]
+    alias = client.post(f"/api/mailcom/accounts/{account['id']}/aliases/import", json={"email": "alias@mail.test", "label": "main"})
+    assert alias.status_code == 200 and alias.json()["status"] == "inserted"
+    synced = client.post("/api/emails/sync-mailcom-aliases")
+    assert synced.status_code == 200 and synced.json()["imported"] == 1
+    email_rows = manager.database["emails"].rows
+    synced_alias = next(row for row in email_rows.values() if row.get("email") == "alias@mail.test")
+    assert synced_alias["accessUrl"].startswith("mailcom://alias/")
+
+
+def test_outlook_register_task_uses_independent_state_and_mongo_proxy_group(tmp_path: Path) -> None:
+    from backend.outlook_register_task_service import OutlookRegisterTaskService
+    from backend.outlook_service import OutlookStore
+    from backend.resource_service import MongoResourceStore
+
+    manager = _OutlookFakeManager()
+    resources = MongoResourceStore(manager)
+    sink = OutlookStore(resources)
+    service = OutlookRegisterTaskService(resources, result_sink=sink)
+
+    async def scenario() -> None:
+        config = await service.update_config({"proxy": {"group": "shared"}, "tasks": 4})
+        assert config["tasks"] == 4
+        assert config["oauth2"]["clientIdConfigured"] is True
+        proxies = await service.resolve_proxy_candidates(await service._internal_config())
+        assert len(proxies) == 1 and proxies[0]["group"] == "shared"
+        assert proxies[0]["password"] == "SECRET_PROXY"
+        # It is passed only to the runtime adapter; the HTTP status contains no credentials.
+        result = await service.status()
+        assert result["status"] == "idle"
+        assert "SECRET_PROXY" not in str(result)
+        assert "runs" not in result
+        await service.record_registered_result(email="created@outlook.test", password="account-secret")
+        account = await manager.database["outlook_accounts"].find_one({"emailNormalized": "created@outlook.test"})
+        assert account and account["password"] == "account-secret" and account["source"] == "registration"
+
+    asyncio.run(scenario())
+
+
+def test_mailcom_migration_preserves_existing_account_and_skips_its_aliases(tmp_path: Path) -> None:
+    import sqlite3
+    from backend.mailcom_service import MailComService
+
+    source = tmp_path / "mailcom.db"
+    with sqlite3.connect(source) as db:
+        db.executescript("""
+            CREATE TABLE accounts (
+                id TEXT PRIMARY KEY, email TEXT, password_encrypted BLOB,
+                status TEXT, message_count INTEGER, last_checked_at TEXT,
+                last_error TEXT, created_at TEXT, updated_at TEXT
+            );
+            CREATE TABLE aliases (
+                id TEXT PRIMARY KEY, account_id TEXT, email TEXT, label TEXT,
+                created_at TEXT, updated_at TEXT
+            );
+        """)
+        db.execute("INSERT INTO accounts VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", ("legacy-1", "same@mail.test", b"protected:legacy-secret", "unknown", None, None, None, "2024", "2024"))
+        db.execute("INSERT INTO aliases VALUES (?, ?, ?, ?, ?, ?)", ("alias-1", "legacy-1", "old-alias@mail.test", "old", "2024", "2024"))
+
+    manager = _OutlookFakeManager()
+    service = MailComService(
+        MongoResourceStore(manager),
+        cipher=_TestCipher(),
+        legacy_cipher=_TestCipher(),
+        sqlite_path=source,
+    )
+
+    async def scenario() -> dict:
+        await service.import_account("same@mail.test", "mongo-secret", source="manual")
+        return await service.migrate_legacy()
+
+    result = asyncio.run(scenario())
+    account = next(iter(manager.database["mailcom_accounts"].rows.values()))
+    assert account["emailNormalized"] == "same@mail.test"
+    assert account["passwordEncrypted"] == b"protected:mongo-secret"
+    assert account["source"] == "manual"
+    assert manager.database["mailcom_aliases"].rows == {}
+    assert sum(row["emailNormalized"] == "same@mail.test" for row in manager.database["mailcom_accounts"].rows.values()) == 1
+    assert result["conflicts"] == 2  # source account conflict + its orphaned alias
+    assert result["status"] == "completed_with_conflicts"
+    assert source.exists()
+    assert Path(result["backup"]).exists()
+
+
+class _TestCipher:
+    def encrypt(self, value: str) -> bytes:
+        return ("protected:" + value).encode()
+
+    def decrypt(self, value: bytes) -> str:
+        return value.decode().removeprefix("protected:")
+
+
 def test_outlook_legacy_migration_is_idempotent_and_preserves_source_files(tmp_path: Path, monkeypatch) -> None:
     import asyncio
     import hashlib

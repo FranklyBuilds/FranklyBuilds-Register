@@ -38,8 +38,8 @@ export interface OutlookRegisterStats {
   status?: string; tasks?: number; success_tasks?: number | null
 }
 export interface OutlookRegisterSnapshot {
-  enabled: boolean; config: Record<string, any>; stats: OutlookRegisterStats
-  failure_stats?: Record<string, number>; result_count?: number
+  taskId: string; enabled: boolean; status: string; config: Record<string, any>; stats: OutlookRegisterStats
+  failure_stats?: Record<string, number>; result_count?: number; log_count?: number; proxyGroup?: string; proxyCount?: number
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -69,6 +69,11 @@ export const outlookGateway = {
   proxies: (page = 1, pageSize = 100) => request<{ items: OutlookProxy[]; total: number; page: number; pageSize: number }>(`/api/outlook/proxies?page=${page}&pageSize=${pageSize}`),
   proxyGroups: () => request<ProxyGroupSummary[]>('/api/outlook/proxy-groups'),
   registerStatus: () => request<OutlookRegisterSnapshot>('/api/outlook/register'),
+  updateRegisterConfig: (config: Record<string, any>) => request<{ config: Record<string, any> }>('/api/outlook/register', { method: 'PUT', body: JSON.stringify(config) }),
+  startRegister: () => request<OutlookRegisterSnapshot>('/api/outlook/register/start', { method: 'POST' }),
+  stopRegister: () => request<OutlookRegisterSnapshot>('/api/outlook/register/stop', { method: 'POST' }),
+  resetRegister: () => request<OutlookRegisterSnapshot>('/api/outlook/register/reset', { method: 'POST' }),
+  registerLogs: (limit = 200) => request<{ items: Array<{ createdAt: string; level: string; line: string }> }>(`/api/outlook/register/logs?limit=${limit}`),
   import: (accounts: Array<{ email: string; password?: string; clientId?: string; refreshToken?: string }>) => request<OutlookImportResult>('/api/outlook/import', { method: 'POST', body: JSON.stringify({ accounts }) }),
   migration: () => request<{ summary?: Record<string, unknown> | null; lastRunAt?: string | null; error?: string }>('/api/outlook/migration'),
   migrateLegacy: () => request<Record<string, unknown>>('/api/outlook/import-legacy', { method: 'POST' }),

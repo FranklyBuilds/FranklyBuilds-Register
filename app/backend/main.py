@@ -15,7 +15,9 @@ from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect, status
-from fastapi.responses import JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 from .errors import (
     LocalProxyUnavailableError,
@@ -33,6 +35,8 @@ from .email_change_models import EmailChangeCreate, EmailChangeRun
 from .email_change_service import EmailChangeService
 from .email_change_store import MongoEmailChangeStore
 from .outlook_service import OutlookService, OutlookStore, migrate_legacy_outlook_data
+from .outlook_register_task_service import OutlookRegisterTaskService
+from .mailcom_service import MailComService
 from .mongo_manager import MongoManager
 from .payment_tools import (
     AccessTokenExtractInput,
@@ -133,6 +137,14 @@ PageNumber = Annotated[int, Query(ge=1)]
 SearchQuery = Annotated[str, Query(max_length=320)]
 
 
+class MailComServerSyncInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    host: str = Field(min_length=1, max_length=253)
+    port: int = Field(default=22, ge=1, le=65535)
+    username: str = Field(min_length=1, max_length=128)
+    password: SecretStr
+
+
 class PageSizeOption(IntEnum):
     TEN = 10
     TWENTY = 20
@@ -213,6 +225,8 @@ def create_app(
     resource_service = ResourceService(resource_store)
     outlook_store = OutlookStore(resource_store)
     outlook_service = OutlookService(outlook_store)
+    outlook_register_tasks = OutlookRegisterTaskService(resource_store, result_sink=outlook_store)
+    mailcom_service = MailComService(resource_store)
     proxy_subscription_service = ProxySubscriptionService(resource_service)
     proxy_health_scheduler = ProxyHealthScheduler(proxy_subscription_service)
     probe_store = MongoProbeStore(mongo)
@@ -225,6 +239,7 @@ def create_app(
         resource_store,
         extractor_service,
         agreement_service,
+        mailcom_service=mailcom_service,
     )
     from .outlook_service import MongoOutlookMailboxClient
 
@@ -270,6 +285,8 @@ def create_app(
     )
     mongo.add_reconnect_callback(resource_store.ensure_indexes)
     mongo.add_reconnect_callback(outlook_store.ensure_indexes)
+    mongo.add_reconnect_callback(outlook_register_tasks.ensure_indexes)
+    mongo.add_reconnect_callback(mailcom_service.ensure_indexes)
     mongo.add_reconnect_callback(run_manager.recover)
     mongo.add_reconnect_callback(probe_store.ensure_indexes)
     mongo.add_reconnect_callback(account_pipeline.ensure_indexes)
@@ -283,6 +300,8 @@ def create_app(
         if mongo.online:
             await resource_store.ensure_indexes()
             await outlook_store.ensure_indexes()
+            await outlook_register_tasks.ensure_indexes()
+            await mailcom_service.ensure_indexes()
             try:
                 _app.state.outlook_migration_fallback = await migrate_legacy_outlook_data(outlook_store)
             except Exception as exc:
@@ -305,6 +324,7 @@ def create_app(
             await global_promotion_service.stop()
             await proxy_health_scheduler.stop()
             await run_manager.shutdown()
+            await outlook_register_tasks.close()
             await account_pipeline.stop()
             for task in tuple(email_change_tasks):
                 task.cancel()
@@ -355,6 +375,8 @@ def create_app(
     app.state.resource_service = resource_service
     app.state.outlook_store = outlook_store
     app.state.outlook_service = outlook_service
+    app.state.outlook_register_tasks = outlook_register_tasks
+    app.state.mailcom_service = mailcom_service
     async def get_outlook_migration_status():
         document = await resource_store.manager.database["outlook_migrations"].find_one({"_id": "legacy-outlook-v1"}, {"summary": 1, "lastRunAt": 1})
         return document or app.state.outlook_migration_fallback
@@ -375,6 +397,74 @@ def create_app(
     app.state.email_change_store = email_change_store
     app.state.email_change_service = configured_email_change_service
     app.state.email_change_tasks = email_change_tasks
+
+    @app.get("/api/mailcom/health")
+    async def mailcom_health() -> dict[str, Any]:
+        mongo.require_online()
+        return {"status": "ok", "service": "main", "storage": "mongodb", "legacyPort": None}
+
+    @app.post("/api/mailcom/accounts/{account_id}/test")
+    async def test_mailcom_account(account_id: str):
+        mongo.require_online()
+        try:
+            return await mailcom_service.test_account(account_id)
+        except Exception as exc:
+            if getattr(exc, "code", None) == "mailbox_not_found":
+                raise HTTPException(status_code=404, detail=exc.message) from exc
+            return {"id": account_id, "ok": False, "error": {"code": getattr(exc, "code", "imap_failed"), "message": getattr(exc, "message", "IMAP 测试失败")}}
+
+    @app.get("/api/mailcom/accounts/{account_id}/messages")
+    async def mailcom_messages(account_id: str, folder: str = Query("INBOX", pattern="^(INBOX|Spam|Junk)$"), limit: int = Query(20, ge=1, le=100)):
+        mongo.require_online()
+        account = await mailcom_service.get_account(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="MailCom 邮箱不存在")
+        try:
+            messages = await mailcom_service.messages_for_email(account["email"], folder=folder, limit=limit)
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail={"code": getattr(exc, "code", "imap_failed"), "message": getattr(exc, "message", "邮件读取失败")}) from exc
+        return {"accountId": account_id, "email": account["email"], "folder": folder, "items": [item.public() for item in messages]}
+
+    @app.get("/api/mailcom/accounts/{account_id}/latest-code")
+    async def mailcom_latest_code(account_id: str):
+        mongo.require_online()
+        account = await mailcom_service.get_account(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="MailCom 邮箱不存在")
+        try:
+            return await mailcom_service.latest_code(account["email"])
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail={"code": getattr(exc, "code", "imap_failed"), "message": getattr(exc, "message", "验证码查询失败")}) from exc
+
+    @app.get("/api/mail/latest")
+    async def latest_mailcom_mail(email: str = Query(min_length=3, max_length=320)):
+        mongo.require_online()
+        if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email.strip()):
+            raise HTTPException(status_code=422, detail="邮箱格式无效")
+        try:
+            return await mailcom_service.latest_mail(email.strip())
+        except Exception as exc:
+            code = getattr(exc, "code", "imap_failed")
+            message = getattr(exc, "message", "MailCom 邮件读取失败")
+            raise HTTPException(status_code=404 if code == "mailbox_not_found" else 502, detail={"code": code, "message": message}) from exc
+
+    @app.get("/api/mail/payment-confirmation")
+    async def mailcom_payment_confirmation(email: str = Query(min_length=3, max_length=320), since: datetime = Query()):
+        mongo.require_online()
+        try:
+            return await mailcom_service.payment_confirmation(email, since)
+        except Exception as exc:
+            code = getattr(exc, "code", "imap_failed")
+            message = getattr(exc, "message", "MailCom 到账查询失败")
+            raise HTTPException(status_code=404 if code == "mailbox_not_found" else 502, detail={"code": code, "message": message}) from exc
+
+    @app.post("/api/mailcom/server-sync")
+    async def mailcom_server_sync(payload: MailComServerSyncInput):
+        mongo.require_online()
+        try:
+            return await mailcom_service.server_sync(host=payload.host, port=payload.port, username=payload.username, password=payload.password.get_secret_value())
+        except Exception as exc:
+            return JSONResponse(status_code=502, content={"detail": {"code": getattr(exc, "code", "server_sync_failed"), "message": getattr(exc, "message", "MailCom 服务器同步失败")}})
 
     @app.exception_handler(MongoUnavailableError)
     async def mongodb_unavailable_handler(
@@ -748,6 +838,16 @@ def create_app(
         # The source's standalone X-Frame-Options header is deliberately not
         # copied; framing is allowed only through this same-origin local proxy.
         return result
+
+    @app.api_route(
+        "/api/tools/payment-links",
+        methods=["POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        include_in_schema=False,
+    )
+    async def removed_payment_links_tool() -> Response:
+        # The simplified checkout endpoint was removed; keep its old path
+        # deterministic for clients that still probe it.
+        raise HTTPException(status_code=404, detail="Not found")
 
     @app.post(
         "/api/tools/access-tokens/extract",
@@ -1196,31 +1296,76 @@ def create_app(
     @app.post("/api/emails/sync-mailcom-aliases", response_model=ImportResult)
     async def sync_mailcom_aliases() -> ImportResult:
         mongo.require_online()
-        try:
-            async with httpx.AsyncClient(trust_env=False, timeout=10) as client:
-                response = await client.get(
-                    "http://127.0.0.1:3211/api/export/registration-items"
-                )
-                response.raise_for_status()
-                payload = response.json()
-        except (httpx.HTTPError, ValueError) as exc:
-            raise HTTPException(
-                status_code=502,
-                detail={
-                    "code": "mailcom_hub_unavailable",
-                    "message": "MailCom Hub 暂时不可用，请先启动本机邮箱管理器",
-                },
-            ) from exc
-        items = payload.get("items") if isinstance(payload, dict) else None
-        if not isinstance(items, list):
-            raise HTTPException(
-                status_code=502,
-                detail={
-                    "code": "mailcom_hub_invalid_response",
-                    "message": "MailCom Hub 返回格式无效",
-                },
-            )
-        return await resource_service.sync_mailcom_aliases(items)
+        return await resource_service.sync_mailcom_aliases(await mailcom_service.registration_items())
+
+    @app.get("/api/mailcom/accounts")
+    async def list_mailcom_accounts(page: int = Query(1, ge=1), page_size: int = Query(50, alias="pageSize", ge=1, le=200), q: str = ""):
+        mongo.require_online()
+        return await mailcom_service.list_accounts(q, page, page_size)
+
+    @app.post("/api/mailcom/accounts/import")
+    async def import_mailcom_accounts(payload: dict[str, Any]):
+        mongo.require_online()
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=422, detail="请求体必须是 JSON 对象")
+        raw = str(payload.get("rawText") or "")
+        total = imported = duplicates = errors = 0
+        for line in raw.splitlines():
+            if not line.strip():
+                continue
+            total += 1
+            parts = line.split("----", 1)
+            if len(parts) != 2:
+                errors += 1
+                continue
+            ok, result = await mailcom_service.import_account(parts[0].strip(), parts[1].strip())
+            imported += int(ok)
+            duplicates += int(not ok and result == "duplicate")
+            errors += int(not ok and result == "invalid")
+        return {"total": total, "imported": imported, "duplicateCount": duplicates, "errorCount": errors}
+
+    @app.get("/api/mailcom/accounts/{account_id}/aliases")
+    async def list_mailcom_aliases(account_id: str):
+        mongo.require_online()
+        if await mailcom_service.get_account(account_id) is None:
+            raise HTTPException(status_code=404, detail="MailCom 邮箱不存在")
+        return {"items": await mailcom_service.aliases_for(account_id)}
+
+    @app.post("/api/mailcom/accounts/{account_id}/aliases/import")
+    async def import_mailcom_alias(account_id: str, payload: dict[str, Any]):
+        mongo.require_online()
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=422, detail="请求体必须是 JSON 对象")
+        result = await mailcom_service.import_alias(account_id, str(payload.get("email") or ""), str(payload.get("label") or ""))
+        if result == "missing_account":
+            raise HTTPException(status_code=404, detail="MailCom 邮箱不存在")
+        if result == "invalid":
+            raise HTTPException(status_code=422, detail="别名邮箱格式无效")
+        return {"status": result}
+
+    @app.delete("/api/mailcom/aliases/{alias_id}")
+    async def delete_mailcom_alias(alias_id: str):
+        mongo.require_online()
+        if not await mailcom_service.delete_alias(alias_id):
+            raise HTTPException(status_code=404, detail="MailCom 别名不存在")
+        return {"deleted": True}
+
+    @app.delete("/api/mailcom/accounts/{account_id}")
+    async def delete_mailcom_account(account_id: str):
+        mongo.require_online()
+        if not await mailcom_service.delete_account(account_id):
+            raise HTTPException(status_code=404, detail="MailCom 邮箱不存在")
+        return {"deleted": True}
+
+    @app.post("/api/mailcom/migrate")
+    async def migrate_mailcom():
+        mongo.require_online()
+        return await mailcom_service.migrate_legacy()
+
+    @app.get("/api/mailcom/export/registration-items")
+    async def export_mailcom_registration_items():
+        mongo.require_online()
+        return {"items": await mailcom_service.registration_items()}
 
     @app.post("/api/emails/bulk-delete", response_model=DeleteResult)
     async def delete_emails(payload: BulkIdsInput) -> DeleteResult:
@@ -1554,6 +1699,23 @@ def create_app(
                 status_code=500,
                 detail={"code": "run_log_read_failed", "message": "无法读取任务日志文件"},
             ) from exc
+
+    frontend_dist = Path(__file__).resolve().parents[1] / "dist"
+    if frontend_dist.is_dir() and (frontend_dist / "index.html").is_file():
+        app.mount("/assets", StaticFiles(directory=frontend_dist / "assets"), name="frontend-assets")
+
+        @app.get("/{frontend_path:path}", include_in_schema=False)
+        async def frontend_entry(frontend_path: str, request: Request):
+            if frontend_path == "api" or frontend_path.startswith("api/"):
+                raise HTTPException(status_code=404, detail="Not found")
+            requested = (frontend_dist / frontend_path).resolve()
+            try:
+                requested.relative_to(frontend_dist.resolve())
+            except ValueError:
+                raise HTTPException(status_code=404, detail="Not found")
+            if requested.is_file():
+                return FileResponse(requested)
+            return FileResponse(frontend_dist / "index.html")
 
     return app
 

@@ -42,6 +42,7 @@ MAILCOM_MANAGER_HOSTS = frozenset({"127.0.0.1", "localhost"})
 MAILCOM_MANAGER_PORT = 3211
 MAILCOM_MANAGER_PATH = "/api/mail/latest"
 MAILCOM_IMAP_SCHEME = "mailcom-imap"
+MAILCOM_MONGO_SCHEME = "mailcom"
 MAILCOM_IMAP_HOST = "imap.mail.com"
 MAILCOM_IMAP_PORT = 993
 MAILCOM_WEBMAIL_URL = "https://www.mail.com/int/"

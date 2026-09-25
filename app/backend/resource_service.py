@@ -2460,47 +2460,35 @@ class ResourceService:
             parent_email = str(item.get("accountEmail") or "").strip()
             access_url = str(item.get("accessUrl") or "").strip()
             key = normalize_email(email)
-            try:
-                parsed = urlsplit(access_url)
-                valid_local_url = (
-                    parsed.scheme.casefold() == "http"
-                    and (parsed.hostname or "").casefold() in {"127.0.0.1", "localhost"}
-                    and (parsed.port or 80) == 3211
-                    and parsed.path.rstrip("/").casefold() == "/api/mail/latest"
-                )
-            except ValueError:
-                valid_local_url = False
-            if (
-                not EMAIL_PATTERN.fullmatch(email)
-                or not EMAIL_PATTERN.fullmatch(parent_email)
-                or not valid_local_url
-            ):
+            legacy_local = False
+            if access_url.startswith("mailcom://account/") or access_url.startswith("mailcom://alias/"):
+                legacy_local = True
+            else:
+                try:
+                    parsed = urlsplit(access_url)
+                    # Legacy HTTP handles remain importable for rollback only;
+                    # all newly exported MailCom aliases use mailcom:// handles.
+                    legacy_local = (
+                        parsed.scheme.casefold() == "http"
+                        and (parsed.hostname or "").casefold() in {"127.0.0.1", "localhost"}
+                        and (parsed.port or 80) == 3211
+                        and parsed.path.rstrip("/").casefold() == "/api/mail/latest"
+                    )
+                except ValueError:
+                    legacy_local = False
+            if not EMAIL_PATTERN.fullmatch(email) or not EMAIL_PATTERN.fullmatch(parent_email) or not legacy_local:
                 errors += 1
                 continue
-            expected_url = (
-                "http://127.0.0.1:3211/api/mail/latest?"
-                f"{urlencode({'email': email})}"
-            )
             if key in seen:
                 duplicates += 1
                 continue
             seen.add(key)
-            inserted = await self.store.upsert_email(
-                key,
-                expected_url,
-                source_type="mailcom_alias",
-                parent_email=parent_email,
-            )
+            inserted = await self.store.upsert_email(key, access_url, source_type="mailcom_alias", parent_email=parent_email)
             if inserted:
                 imported += 1
             else:
                 duplicates += 1
-        return ImportResult(
-            total=total,
-            imported=imported,
-            duplicateCount=duplicates,
-            errorCount=errors,
-        )
+        return ImportResult(total=total, imported=imported, duplicateCount=duplicates, errorCount=errors)
 
     async def import_proxies(
         self,
