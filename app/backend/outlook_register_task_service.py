@@ -785,7 +785,9 @@ class OutlookRegisterTaskService:
             await self._apply_stats(TASK_ID, {}, {}, {"status": "interrupted", "finished": True})
             raise
         except Exception as exc:
-            await control.log(f"[Outlook] 任务异常：{type(exc).__name__}", "ERROR")
+            detail = _redact_outlook_log(exc).strip()[:240]
+            suffix = f": {detail}" if detail else ""
+            await control.log(f"[Outlook] 任务异常：{type(exc).__name__}{suffix}", "ERROR")
             await self._apply_stats(TASK_ID, {}, {"executor_error": 1}, {"status": "failed", "finished": True})
             await self._set_error(TASK_ID, "outlook_registration_task_failed")
         finally:
@@ -810,7 +812,9 @@ class OutlookRegisterTaskService:
             if status not in {"completed", "disabled", "interrupted", "failed"}:
                 status = "completed"
         except Exception as exc:
-            control.on_log(f"[Outlook] 任务异常: {type(exc).__name__}", "ERROR")
+            detail = _redact_outlook_log(exc).strip()[:240]
+            suffix = f": {detail}" if detail else ""
+            control.on_log(f"[Outlook] 任务异常: {type(exc).__name__}{suffix}", "ERROR")
             status = "failed"
             failures["executor_error"] = 1
             error = "outlook_registration_task_failed"

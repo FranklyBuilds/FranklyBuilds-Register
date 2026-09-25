@@ -723,6 +723,35 @@ def test_outlook_task_reset_clears_stale_proxy_metadata() -> None:
     asyncio.run(scenario())
 
 
+def test_outlook_task_error_log_keeps_detail_but_redacts_secret() -> None:
+    from backend.outlook_register_task_service import OutlookRegisterTaskService
+
+    class Adapter:
+        async def run_async(self, config, control):
+            _ = config, control
+            raise ValueError("proxy password=SECRET_PROXY")
+
+    manager = _OutlookFakeManager()
+    service = OutlookRegisterTaskService(MongoResourceStore(manager), adapter=Adapter())
+
+    async def scenario() -> None:
+        await service.ensure_indexes()
+        await service.start()
+        for _ in range(40):
+            state = await service.status()
+            if state["status"] == "failed":
+                break
+            await asyncio.sleep(0.01)
+        assert state["status"] == "failed"
+        logs = await service.logs()
+        lines = [item["line"] for item in logs]
+        assert any("ValueError" in line and "proxy password=[redacted]" in line for line in lines)
+        assert all("SECRET_PROXY" not in line for line in lines)
+        await service.close()
+
+    asyncio.run(scenario())
+
+
 def test_outlook_task_stop_keeps_terminal_ownership_until_worker_exits() -> None:
     from backend.outlook_register_task_service import OutlookRegisterTaskService
 
