@@ -88,6 +88,26 @@ def import_emails(client: TestClient, count: int) -> None:
     assert response.json()["imported"] == count
 
 
+def import_jp_proxy(client: TestClient) -> None:
+    response = client.post(
+        "/api/proxies/import",
+        json={
+            "rawText": """proxies:
+  - name: integration-jp
+    type: http
+    server: proxy.integration.test
+    port: 18080
+    username: integration-user
+    password: integration-pass
+    country: JP
+    group: 默认组
+"""
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["imported"] == 1
+
+
 def configure_execution(client: TestClient, *, concurrency: int = 2) -> None:
     response = client.put(
         "/api/settings/execution",
@@ -108,6 +128,7 @@ def test_browser_probe_workspace_preflight_does_not_reserve_when_missing(mongo_c
     client, _ = mongo_client
     configure_execution(client, concurrency=2)
     import_emails(client, 2)
+    import_jp_proxy(client)
     manager = client.app.state.run_manager
 
     async def no_workspaces(_settings):
@@ -134,6 +155,7 @@ def test_browser_probe_route_aggregates_worker_snapshots(mongo_client) -> None:
     client, _ = mongo_client
     configure_execution(client, concurrency=2)
     import_emails(client, 2)
+    import_jp_proxy(client)
     manager = client.app.state.run_manager
 
     async def two_workspaces(_settings):

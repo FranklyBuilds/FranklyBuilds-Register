@@ -479,7 +479,7 @@ class MockRunCreate(ApiModel):
 
 class BrowserProbeRunCreate(ApiModel):
     count: int = Field(ge=1, strict=True)
-    country: str = Field(min_length=2, max_length=2)
+    country: str = Field(default="JP", min_length=2, max_length=2)
     group: str = Field(default="", max_length=64)
     emailSource: EmailSource = "all"
 
