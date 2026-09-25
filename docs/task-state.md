@@ -17,7 +17,7 @@
 
 ## 当前阶段
 
-代码完成，交付前验证已完成；真实外部服务验收按环境条件保留为部署后操作。
+PR 审核修复已完成，待推送后由最新 CI 复核；真实外部服务验收按环境条件保留为部署后操作。
 
 ## 已完成
 
@@ -29,19 +29,19 @@
 - 已将 Outlook 账号管理页切换到主 API；代理清单与分组复用主 Mongo 资源；邮箱池支持 Outlook 来源筛选和分配状态展示。
 - 旧 Outlook 8001 服务未由主启停脚本启动；主服务已提供 Outlook 账号/Graph 管理 API。
 - 已补迁移、OAuth/Graph/OTP 读信模拟、敏感字段隔离、导入幂等、冲突邮箱不接管、GPT 成功分配及邮箱换绑测试。
-- 前端和后端既有测试在上一阶段通过；本阶段已重新执行完整验证。
+- 前端和后端既有测试在上一阶段通过；本次 PR 审核补丁新增迁移冲突回归覆盖。
 
 ## 进行中
 
-- 全量验证和 Windows 本机端到端冒烟；真实 Microsoft OAuth/Graph、真实 MongoDB、真实 IMAP 仍需在具备对应外部服务的环境执行。
+- 推送 PR 审核修复并等待最新 CI；真实 Microsoft OAuth/Graph、真实 MongoDB、真实 IMAP 和 Windows 本机端到端冒烟仍需在具备对应外部服务的环境执行。
 
 ## 已验证的本阶段结果
 
 - MailCom Mongo service、内部 `mailcom://account|alias` 句柄、SQLite 只读备份/副本迁移和主服务 DPAPI 前缀重加密已落地。
 - 主服务邮箱同步不再主动请求旧 3211；旧 HTTP 句柄仅保留迁移/回滚兼容。
 - 新增服务级测试覆盖 MailCom 导入幂等/脱敏、别名同步、Outlook 独立任务状态/代理组/结果入库。
-- 前端 Vitest：16 个文件、119 项通过；type-check/build-only 通过；生产构建仅有主 chunk 超过 500 KB 的非阻断提示。
-- 后端：767 passed、13 skipped；MailCom 兼容测试 14 passed；Python compileall、PowerShell 启动/停止脚本解析和 git diff --check 通过。
+- 前端 Vitest：16 个文件、119 项通过（全量验证使用 10 秒测试超时）；type-check/build-only 通过；生产构建仅有主 chunk 超过 500 KB 的非阻断提示。
+- 后端：768 passed、13 skipped；MailCom 兼容测试 14 passed；Python compileall 和 git diff --check 通过。
 - 静态托管冒烟：`/api/health` 200，`/launch`、`/mailcom`、`/outlook-register` 200；未知 `/api/tools/payment-links` POST 404。
 
 ## 待处理 / 风险
@@ -70,4 +70,4 @@
 
 ## 下一步唯一动作
 
-在部署环境按真实 Mongo、OAuth/Graph、IMAP 和 Windows 启停验收命令复核；当前代码已提交并关联 PR。
+提交并推送 PR 审核修复，等待最新 CI 通过后复核 mergeability 并合并；部署环境再按真实 Mongo、OAuth/Graph、IMAP 和 Windows 启停验收命令复核。

@@ -211,14 +211,16 @@ class MailComService:
         item["aliasCount"] = await self.resources._guard(self.aliases.count_documents({"accountId": account_id}))
         return _public_account(item)
 
-    async def import_account(self, email: str, password: str) -> tuple[bool, str]:
+    async def import_account(
+        self, email: str, password: str, *, source: str = "manual"
+    ) -> tuple[bool, str]:
         normalized = normalize_email(email)
         if not EMAIL_RE.fullmatch(normalized) or not password:
             return False, "invalid"
         if await self.resources._guard(self.aliases.find_one({"emailNormalized": normalized})) or await self.resources._guard(self.accounts.find_one({"emailNormalized": normalized})):
             return False, "duplicate"
         now = utc_now()
-        document = {"_id": uuid4().hex, "email": email.strip(), "emailNormalized": normalized, "passwordEncrypted": self._get_cipher().encrypt(password), "status": "unknown", "messageCount": None, "lastCheckedAt": None, "lastError": None, "createdAt": now, "updatedAt": now}
+        document = {"_id": uuid4().hex, "email": email.strip(), "emailNormalized": normalized, "passwordEncrypted": self._get_cipher().encrypt(password), "source": source, "status": "unknown", "messageCount": None, "lastCheckedAt": None, "lastError": None, "createdAt": now, "updatedAt": now}
         try:
             await self.resources._guard(self.accounts.insert_one(document))
         except Exception as exc:
@@ -282,6 +284,8 @@ class MailComService:
         row = await self.resources._guard(collection.find_one({"_id": identifier}))
         if row is None:
             raise MailboxClientError("mailbox_not_found", "MailCom 邮箱不存在")
+        if normalize_email(str(row.get("email") or "")) != normalize_email(email):
+            raise MailboxClientError("mailbox_auth_invalid", "MailCom 访问句柄与邮箱不匹配")
         if kind == "alias":
             row = await self.resources._guard(self.accounts.find_one({"_id": row.get("accountId")}))
             if row is None:
@@ -423,7 +427,7 @@ class MailComService:
         except Exception:
             source_copy.unlink(missing_ok=True)
             raise
-        imported = duplicates = errors = account_count = alias_count = 0
+        imported = duplicates = conflicts = errors = account_count = alias_count = 0
         root = source.parent.parent
         if str(root) not in sys.path:
             sys.path.insert(0, str(root))
@@ -432,7 +436,6 @@ class MailComService:
             from manager.crypto import DpapiCredentialCipher
             old_cipher = DpapiCredentialCipher()
         account_ids: dict[str, str] = {}
-        imported_account_ids: set[str] = set()
         try:
             with sqlite3.connect(source_copy) as db:
                 db.row_factory = sqlite3.Row
@@ -441,15 +444,31 @@ class MailComService:
             for row in accounts:
                 account_count += 1
                 try:
+                    legacy_email = str(row["email"])
+                    normalized_email = normalize_email(legacy_email)
+                    existing = await self.resources._guard(
+                        self.accounts.find_one({"emailNormalized": normalized_email})
+                    )
+                    if existing and existing.get("source") != "sqlite-migration":
+                        # Never attach legacy aliases to a same-address account
+                        # with different credentials already owned by Mongo.
+                        conflicts += 1
+                        continue
                     password = old_cipher.decrypt(bytes(row["password_encrypted"]))
-                    ok, result = await self.import_account(str(row["email"]), password)
+                    ok, result = await self.import_account(
+                        legacy_email, password, source="sqlite-migration"
+                    )
                     imported += int(ok)
                     duplicates += int(not ok and result == "duplicate")
-                    account = await self.resources._guard(self.accounts.find_one({"emailNormalized": normalize_email(str(row["email"]))}))
-                    if account:
+                    account = await self.resources._guard(
+                        self.accounts.find_one({"emailNormalized": normalized_email})
+                    )
+                    if account and account.get("source") == "sqlite-migration":
                         account_ids[str(row["id"])] = str(account["_id"])
-                        if ok:
-                            imported_account_ids.add(str(row["id"]))
+                    elif account:
+                        # A concurrent writer won the unique-email race. Keep
+                        # the Mongo record and skip aliases from this source.
+                        conflicts += 1
                 except Exception:
                     errors += 1
             for row in aliases:
@@ -457,7 +476,7 @@ class MailComService:
                 try:
                     parent_id = str(row["account_id"])
                     if parent_id not in account_ids:
-                        errors += 1
+                        conflicts += 1
                         continue
                     result = await self.import_alias(account_ids[parent_id], str(row["email"]), str(row["label"] or ""))
                     imported += int(result == "inserted")
@@ -471,13 +490,14 @@ class MailComService:
             except OSError:
                 pass
         summary = {
-            "status": "completed" if errors == 0 else "completed_with_errors",
+            "status": "completed_with_errors" if errors else "completed_with_conflicts" if conflicts else "completed",
             "source": str(source),
             "backup": str(backup),
             "accounts": account_count,
             "aliases": alias_count,
             "imported": imported,
             "duplicates": duplicates,
+            "conflicts": conflicts,
             "errors": errors,
             "completedAt": datetime.now(timezone.utc).isoformat(),
         }

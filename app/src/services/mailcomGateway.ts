@@ -12,7 +12,7 @@ export interface MailComAccount {
 export interface MailComAlias { id: string; accountId: string; email: string; label: string; createdAt: string | null; updatedAt: string | null }
 export interface MailComMessage { id?: string; subject: string; sender: string; recipients: string; receivedAt: string | null; folder: string; preview: string; verificationCode: string | null }
 export interface MailComPage { items: MailComAccount[]; total: number; page: number; pageSize: number }
-export interface MailComMigrationResult { status: string; source?: string; backup?: string; accounts?: number; aliases?: number; imported?: number; duplicates?: number; errors?: number; completedAt?: string }
+export interface MailComMigrationResult { status: string; source?: string; backup?: string; accounts?: number; aliases?: number; imported?: number; duplicates?: number; conflicts?: number; errors?: number; completedAt?: string }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(path, { ...init, headers: { ...(init.body ? { 'Content-Type': 'application/json' } : {}), ...(init.headers || {}) } })

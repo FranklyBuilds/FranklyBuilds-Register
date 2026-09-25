@@ -425,6 +425,51 @@ def test_outlook_register_task_uses_independent_state_and_mongo_proxy_group(tmp_
     asyncio.run(scenario())
 
 
+def test_mailcom_migration_preserves_existing_account_and_skips_its_aliases(tmp_path: Path) -> None:
+    import sqlite3
+    from backend.mailcom_service import MailComService
+
+    source = tmp_path / "mailcom.db"
+    with sqlite3.connect(source) as db:
+        db.executescript("""
+            CREATE TABLE accounts (
+                id TEXT PRIMARY KEY, email TEXT, password_encrypted BLOB,
+                status TEXT, message_count INTEGER, last_checked_at TEXT,
+                last_error TEXT, created_at TEXT, updated_at TEXT
+            );
+            CREATE TABLE aliases (
+                id TEXT PRIMARY KEY, account_id TEXT, email TEXT, label TEXT,
+                created_at TEXT, updated_at TEXT
+            );
+        """)
+        db.execute("INSERT INTO accounts VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", ("legacy-1", "same@mail.test", b"protected:legacy-secret", "unknown", None, None, None, "2024", "2024"))
+        db.execute("INSERT INTO aliases VALUES (?, ?, ?, ?, ?, ?)", ("alias-1", "legacy-1", "old-alias@mail.test", "old", "2024", "2024"))
+
+    manager = _OutlookFakeManager()
+    service = MailComService(
+        MongoResourceStore(manager),
+        cipher=_TestCipher(),
+        legacy_cipher=_TestCipher(),
+        sqlite_path=source,
+    )
+
+    async def scenario() -> dict:
+        await service.import_account("same@mail.test", "mongo-secret", source="manual")
+        return await service.migrate_legacy()
+
+    result = asyncio.run(scenario())
+    account = next(iter(manager.database["mailcom_accounts"].rows.values()))
+    assert account["emailNormalized"] == "same@mail.test"
+    assert account["passwordEncrypted"] == b"protected:mongo-secret"
+    assert account["source"] == "manual"
+    assert manager.database["mailcom_aliases"].rows == {}
+    assert sum(row["emailNormalized"] == "same@mail.test" for row in manager.database["mailcom_accounts"].rows.values()) == 1
+    assert result["conflicts"] == 2  # source account conflict + its orphaned alias
+    assert result["status"] == "completed_with_conflicts"
+    assert source.exists()
+    assert Path(result["backup"]).exists()
+
+
 class _TestCipher:
     def encrypt(self, value: str) -> bytes:
         return ("protected:" + value).encode()
