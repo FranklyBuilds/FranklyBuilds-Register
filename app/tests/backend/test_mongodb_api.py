@@ -361,6 +361,12 @@ class _OutlookFakeCollection:
         for key, row in list(self.rows.items()):
             if self._match(row, query): self.rows.pop(key); return SimpleNamespace(deleted_count=1)
         return SimpleNamespace(deleted_count=0)
+    async def delete_many(self, query):
+        from types import SimpleNamespace
+        deleted = 0
+        for key, row in list(self.rows.items()):
+            if self._match(row, query): self.rows.pop(key); deleted += 1
+        return SimpleNamespace(deleted_count=deleted)
 
 
 
@@ -451,6 +457,376 @@ def test_outlook_register_task_uses_independent_state_and_mongo_proxy_group(tmp_
         assert account and account["password"] == "account-secret" and account["source"] == "registration"
 
     asyncio.run(scenario())
+
+
+def test_outlook_registration_auto_mode_dispatches_browser_engine_when_pool_has_no_oauth() -> None:
+    from backend.outlook_register_task_service import OutlookRegistrationUnifiedAdapter
+
+    class Store:
+        async def registration_candidates(self, *, limit: int = 500):
+            _ = limit
+            return []
+
+    class Service:
+        store = Store()
+
+    class Control:
+        def __init__(self) -> None:
+            self.lines: list[str] = []
+
+        async def log(self, line: str, level: str | None = None) -> None:
+            self.lines.append(f"{level or 'INFO'}:{line}")
+
+        def should_stop(self) -> bool:
+            return False
+
+    adapter = OutlookRegistrationUnifiedAdapter(object(), Service())
+    called: list[str] = []
+
+    def fake_engine(config, control):
+        called.append(str(config["execution_mode"]))
+        return {"status": "completed", "submitted": 1}
+
+    adapter.engine = fake_engine
+    control = Control()
+    result = asyncio.run(adapter.run_async({"execution_mode": "auto", "tasks": 1}, control))
+
+    assert result["status"] == "completed"
+    assert called == ["auto"]
+    assert any("启动浏览器注册执行引擎" in line for line in control.lines)
+
+
+def test_outlook_registration_engine_bridges_proxy_candidates_and_mongo_result_sink() -> None:
+    from types import SimpleNamespace
+    from backend.outlook_register_task_service import OutlookRegistrationEngineAdapter
+
+    captured: dict[str, object] = {}
+    persisted: list[dict[str, object]] = []
+
+    class Store:
+        async def store_registration_result(self, **payload):
+            persisted.append(dict(payload))
+            return "account-1", True
+
+    class Service:
+        async def check_graph(self, *_args, **_kwargs):
+            raise AssertionError("registered result should not call Graph validation")
+
+    class Control:
+        def __init__(self) -> None:
+            self.logs: list[str] = []
+
+        def call(self, coroutine):
+            return asyncio.run(coroutine)
+
+        def on_log(self, line, level=None):
+            self.logs.append(f"{level or 'INFO'}:{line}")
+
+        async def log(self, line, level=None):
+            self.on_log(line, level)
+
+    def runner(config, control, *, clear_profiles, install_signals, result_sink):
+        _ = control, clear_profiles, install_signals
+        captured.update(config)
+        result_sink({
+            "kind": "registered",
+            "email": "created@outlook.test",
+            "password": "account-secret",
+            "proxy": "http://proxy-user:proxy-pass@proxy.example.test:8080",
+        })
+        return {"status": "completed", "submitted": 1, "succeeded": 1, "failed": 0}
+
+    adapter = OutlookRegistrationEngineAdapter(Store(), Service())
+    adapter._load_runner = lambda: (SimpleNamespace(OutlookController=None), runner)
+    config = {
+        "proxy": {
+            "source": "mongo",
+            "candidates": [{
+                "scheme": "http",
+                "host": "proxy.example.test",
+                "port": 8080,
+                "username": "proxy-user",
+                "password": "proxy-pass",
+            }],
+        },
+        "tasks": 1,
+    }
+    result = adapter(config, Control())
+
+    assert result["status"] == "completed"
+    assert captured["proxy"] == config["proxy"]
+    assert persisted == [{
+        "email": "created@outlook.test",
+        "password": "account-secret",
+        "client_id": "",
+        "refresh_token": "",
+        "oauth": False,
+        "recovery_bound": False,
+        "recovery_email": "",
+        "country": "",
+        "proxy": "http://proxy-user:proxy-pass@proxy.example.test:8080",
+    }]
+
+
+def test_outlook_registration_execution_mode_can_force_authorized_path() -> None:
+    from backend.outlook_register_task_service import OutlookRegistrationUnifiedAdapter
+
+    class Service:
+        class Store:
+            async def registration_candidates(self, *, limit: int = 500):
+                _ = limit
+                return [{"_id": "account-1"}]
+
+        store = Store()
+
+    class Control:
+        def __init__(self) -> None:
+            self.lines: list[str] = []
+
+        async def log(self, line: str, level: str | None = None) -> None:
+            self.lines.append(f"{level or 'INFO'}:{line}")
+
+        def should_stop(self) -> bool:
+            return False
+
+    class Authorized:
+        async def run_async(self, config, control):
+            _ = config, control
+            return {"status": "completed", "processed": 1}
+
+    adapter = OutlookRegistrationUnifiedAdapter(object(), Service())
+    adapter.authorized = Authorized()
+    control = Control()
+    result = asyncio.run(adapter.run_async({"execution_mode": "authorized", "tasks": 1}, control))
+
+    assert result == {"status": "completed", "processed": 1}
+    assert any("仅校验 Mongo 中已有 OAuth 账号" in line for line in control.lines)
+
+
+def test_outlook_task_sync_adapter_finalizes_without_self_deadlock() -> None:
+    from backend.outlook_register_task_service import OutlookRegisterTaskService
+
+    class Adapter:
+        def __call__(self, config, control):
+            _ = config
+            control.on_stats({"submitted": 1}, {}, {"status": "done", "finished": True})
+            return {"status": "completed"}
+
+    manager = _OutlookFakeManager()
+    service = OutlookRegisterTaskService(MongoResourceStore(manager), adapter=Adapter())
+
+    async def scenario() -> None:
+        await service.ensure_indexes()
+        started = await service.start()
+        assert started["status"] == "running"
+        for _ in range(40):
+            state = await service.status()
+            if state["status"] == "completed":
+                break
+            await asyncio.sleep(0.01)
+        state = await service.status()
+        assert state["status"] == "completed"
+        assert state["stats"]["submitted"] == 1
+        assert state["finishedAt"] is not None
+        assert state["stats"]["status"] == "completed"
+        await service.close()
+
+    asyncio.run(scenario())
+
+
+def test_outlook_task_stop_keeps_terminal_ownership_until_worker_exits() -> None:
+    from backend.outlook_register_task_service import OutlookRegisterTaskService
+
+    class Adapter:
+        def __call__(self, config, control):
+            _ = config
+            while not control.should_stop():
+                control.on_stats({"running": 1}, {}, {"status": "done", "finished": True})
+                import time
+                time.sleep(0.005)
+            return {"status": "interrupted"}
+
+    manager = _OutlookFakeManager()
+    service = OutlookRegisterTaskService(MongoResourceStore(manager), adapter=Adapter())
+
+    async def scenario() -> None:
+        await service.ensure_indexes()
+        await service.start()
+        await asyncio.sleep(0.02)
+        state = await service.stop()
+        assert state["status"] == "interrupted"
+        assert state["finishedAt"] is not None
+        assert state["stats"]["status"] == "interrupted"
+        await service.close()
+
+    asyncio.run(scenario())
+
+
+def test_outlook_pool_mongo_runtime_generates_submailboxes_and_extracts_otp() -> None:
+    from backend.outlook_pool_service import OutlookPoolService
+    from backend.outlook_service import OutlookStore
+
+    class FakeOutlookService:
+        async def messages(self, account_id, *, folder="inbox", top=10, recipient=None):
+            assert account_id == "outlook1"
+            assert folder == "inbox" and top == 10
+            assert recipient and "+" in recipient
+            return {"messages": [{"id": "m1", "subject": "Security code 482931", "preview": "Your code is 482931"}]}
+
+        async def check_oauth(self, account_id):
+            return {"ok": True, "oauthStatus": "ok", "graphStatus": "ok", "poolStatus": "available"}
+
+    manager = _OutlookFakeManager()
+    resources = MongoResourceStore(manager)
+    store = OutlookStore(resources)
+    pool = OutlookPoolService(resources, store, FakeOutlookService())
+
+    async def scenario() -> None:
+        await pool.ensure_indexes()
+        stats = await pool.stats()
+        assert stats["total"] == 1 and stats["oauth2"] == 1
+        created = await pool.generate_sub_emails("outlook1", count=2, tag_prefix="otp-")
+        assert len(created["created"]) == 2
+        listed = await pool.list_accounts(category="sub")
+        assert listed["total"] == 2
+        assert all(item["receiveUrl"] and item["receiveUiUrl"] for item in listed["items"])
+        assert "SECRET_REFRESH" not in str(listed)
+        token = created["created"][0]["receiveUrl"].rstrip("/").rsplit("/", 1)[-1]
+        payload = await pool.receive_payload(token)
+        assert payload["latest_code"] == "482931"
+        assert payload["messages"][0]["codes"] == ["482931"]
+        config = await pool.update_oauth_check_config({"enabled": False, "interval_sec": 300})
+        assert config["enabled"] is False and config["interval_sec"] == 300
+        checked = await pool.run_oauth_check(ids=["outlook1"])
+        assert checked["ok"] is True and checked["ok_count"] == 1
+        await pool.stop_scheduler()
+
+    asyncio.run(scenario())
+
+
+def test_outlook_receive_ui_validates_capability_tokens_and_no_store_headers(tmp_path: Path) -> None:
+    manager = _OutlookFakeManager()
+    app = create_app(settings_path=tmp_path / "settings.json", log_dir=tmp_path / "logs", mongo_manager=manager)
+    client = TestClient(app)
+
+    invalid = client.get("/r/not-a-valid-token!")
+    assert invalid.status_code == 404
+
+    valid = client.get("/r/" + "A" * 32)
+    assert valid.status_code == 200
+    assert valid.headers["cache-control"] == "no-store"
+    assert valid.headers["referrer-policy"] == "no-referrer"
+
+
+def test_outlook_graph_message_detail_cannot_cross_submailbox_recipient() -> None:
+    from backend.errors import ResourceNotFoundError
+    from backend.outlook_service import OutlookService, OutlookStore
+
+    manager = _OutlookFakeManager()
+    service = OutlookService(OutlookStore(MongoResourceStore(manager)))
+
+    async def ensure(_account):
+        return None
+
+    async def refresh(_account, *, proxy=None):
+        _ = proxy
+        return {"access_token": "ACCESS_FIXTURE", "refresh_token": "REFRESH_FIXTURE"}
+
+    async def graph_get(_path, _access_token, _params, *, proxy=None):
+        _ = proxy
+        return {
+            "id": "message-1",
+            "subject": "OTP",
+            "from": {"emailAddress": {"address": "sender@example.test", "name": "Sender"}},
+            "toRecipients": [{"emailAddress": {"address": "sub+one@outlook.test"}}],
+            "ccRecipients": [],
+            "receivedDateTime": "2026-09-25T10:00:00Z",
+            "body": {"contentType": "text", "content": "482931"},
+            "bodyPreview": "482931",
+        }
+
+    service._ensure_graph_identity = ensure
+    service._refresh = refresh
+    service._graph_get = graph_get
+
+    async def scenario() -> None:
+        allowed = await service.message_detail("outlook1", "message-1", recipient="sub+one@outlook.test")
+        assert allowed["message"]["subject"] == "OTP"
+        with pytest.raises(ResourceNotFoundError):
+            await service.message_detail("outlook1", "message-1", recipient="sub+two@outlook.test")
+
+    asyncio.run(scenario())
+
+
+def test_outlook_runtime_logs_redact_proxy_and_token_values() -> None:
+    from backend.outlook_register_task_service import _redact_outlook_log
+
+    import sys
+    legacy_root = Path(__file__).resolve().parents[2] / "outlook_register"
+    sys.path.insert(0, str(legacy_root))
+    try:
+        from controllers.outlook_controller import OutlookController
+    finally:
+        sys.path.remove(str(legacy_root))
+
+    text = "proxy=http://SECRET_USER:SECRET_PASS@proxy.example.test:8080 refresh_token=SECRET_REFRESH"
+    assert "SECRET_USER" not in _redact_outlook_log(text)
+    assert "SECRET_PASS" not in _redact_outlook_log(text)
+    assert "SECRET_REFRESH" not in _redact_outlook_log(text)
+    assert "SECRET_USER" not in OutlookController._redact_log_text(text)
+    assert "SECRET_PASS" not in OutlookController._redact_log_text(text)
+    assert "SECRET_REFRESH" not in OutlookController._redact_log_text(text)
+
+
+def test_outlook_registration_both_mode_aggregates_registration_and_authorized_stats() -> None:
+    from backend.outlook_register_task_service import OutlookRegistrationUnifiedAdapter
+
+    class Store:
+        async def registration_candidates(self, *, limit: int = 500):
+            _ = limit
+            return [{"_id": "account-1"}]
+
+    class Service:
+        store = Store()
+
+    class Control:
+        def __init__(self) -> None:
+            self.stats_rows = []
+            self.lines = []
+
+        async def log(self, line: str, level: str | None = None) -> None:
+            self.lines.append((level, line))
+
+        async def stats(self, runtime, failures, extra=None) -> None:
+            self.stats_rows.append((dict(runtime or {}), dict(failures or {}), dict(extra or {})))
+
+        def on_stats(self, runtime, failures, extra=None) -> None:
+            self.stats_rows.append((dict(runtime or {}), dict(failures or {}), dict(extra or {})))
+
+        def on_log(self, line, level=None) -> None:
+            self.lines.append((level, line))
+
+        def should_stop(self) -> bool:
+            return False
+
+    class Authorized:
+        async def run_async(self, config, control):
+            _ = config
+            await control.stats({"submitted": 2, "succeeded": 1, "failed": 1}, {"oauth": 1}, {"status": "running"})
+            return {"status": "completed", "submitted": 2, "succeeded": 1, "failed": 1}
+
+    adapter = OutlookRegistrationUnifiedAdapter(object(), Service())
+    adapter.engine = lambda config, control: {"status": "completed", "submitted": 3, "succeeded": 2, "failed": 1}
+    adapter.authorized = Authorized()
+    control = Control()
+    result = asyncio.run(adapter.run_async({"execution_mode": "both", "tasks": 2}, control))
+
+    assert result["submitted"] == 5
+    assert result["succeeded"] == 3
+    assert result["failed"] == 2
+    assert control.stats_rows[-1][0]["submitted"] == 5
+    assert control.stats_rows[-1][0]["succeeded"] == 3
+    assert control.stats_rows[-1][0]["failed"] == 2
 
 
 def test_mailcom_migration_preserves_existing_account_and_skips_its_aliases(tmp_path: Path) -> None:

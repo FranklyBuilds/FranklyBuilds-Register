@@ -1,9 +1,11 @@
 import os
+import re
 import time
 import random
 import math
 import shutil
 import threading
+from urllib.parse import quote
 from faker import Faker
 from patchright.sync_api import sync_playwright
 
@@ -34,6 +36,15 @@ class OutlookController:
     def set_log_sink(cls, fn):
         """设置/清除全局日志 sink（RegisterService 启停时挂载）。"""
         cls._log_sink = fn
+
+    @staticmethod
+    def _redact_log_text(value):
+        """Redact proxy/account credentials before stdout or file logging."""
+        text = str(value or "")
+        text = re.sub(r"(?i)(https?://)[^/@\s]+:[^/@\s]+@", r"\1[redacted]@", text)
+        text = re.sub(r"(?i)(?<![\w])([A-Za-z0-9_.-]+):([^@\s:]+)@((?:[A-Za-z0-9_.-]+|\[[^]]+\]):\d+)", r"[redacted]@\3", text)
+        text = re.sub(r"(?i)\b(refresh[_-]?token|access[_-]?token|password|secret|client[_-]?id|authorization|cookie)\b\s*([=:])\s*[^\s,;]+", r"\1\2[redacted]", text)
+        return text
 
     # 国家代码 → (locale, 默认时区)
     LOCALE_MAP = {
@@ -217,7 +228,7 @@ class OutlookController:
         # 强制单行：Playwright Call log 等多行异常不得刷屏
         if line is None:
             return
-        text = str(line).replace('\r\n', '\n').replace('\r', '\n')
+        text = type(self)._redact_log_text(line).replace('\r\n', '\n').replace('\r', '\n')
         if '\n' in text:
             parts = [p.strip() for p in text.split('\n') if p.strip()]
             # 丢弃 Call log 明细行
@@ -423,19 +434,69 @@ class OutlookController:
     # ============================================================
     @classmethod
     def _parse_proxy_config(cls, pc):
-        """解析代理配置：单端口 or 端口池。返回 {type, host, ports, max_per}"""
+        """解析代理配置。主 Register 可传 Mongo 候选 URL，旧端口配置继续兼容。"""
+        pc = pc or {}
         mode = pc.get('mode', 'single')
         proxy_type = pc.get('type', 'http')
         host = pc.get('host', '127.0.0.1')
+        candidates = []
+        for item in pc.get('candidates') or []:
+            if isinstance(item, str):
+                value = item.strip()
+            else:
+                row = item or {}
+                scheme = str(row.get('scheme') or proxy_type).strip().lower()
+                row_host = str(row.get('host') or '').strip()
+                try:
+                    row_port = int(row.get('port') or 0)
+                except (TypeError, ValueError):
+                    row_port = 0
+                if not row_host or not 1 <= row_port <= 65535:
+                    continue
+                user = quote(str(row.get('username') or ''), safe='')
+                password = quote(str(row.get('password') or ''), safe='')
+                auth = f"{user}:{password}@" if user or password else ''
+                value = f"{scheme}://{auth}{row_host}:{row_port}"
+            if value and value not in candidates:
+                candidates.append(value)
         if mode == 'single':
             ports = [pc.get('single_port', 7890)]
         else:
             ports = list(range(pc.get('port_start', 24000), pc.get('port_end', 24064) + 1))
-        return {'type': proxy_type, 'host': host, 'ports': ports, 'max_per': pc.get('max_per_proxy', 20)}
+        return {
+            'type': proxy_type, 'host': host, 'ports': ports,
+            'max_per': max(1, int(pc.get('max_per_proxy', 20) or 20)),
+            'candidates': candidates,
+        }
 
     def _pick_proxy(self):
-        """选择代理端口：两步——①过滤（排除用满的+烂IP）②加权随机（胜率高的优先）"""
+        """选择 Mongo 候选或旧端口代理，并按 max_per_proxy 限制使用次数。"""
         cfg = self._proxy_config
+        if cfg.get('candidates'):
+            with self._state_lock:
+                available = [
+                    value for value in cfg['candidates']
+                    if self._proxy_usage.get(value, 0) < cfg['max_per']
+                ]
+                if not available:
+                    available = list(cfg['candidates'])
+                    for value in available:
+                        self._proxy_usage[value] = 0
+                weights = []
+                for value in available:
+                    key = value.split('//', 1)[-1]
+                    info = self._ip_tracker.get(key, {})
+                    total = info.get('total', 0)
+                    win = info.get('win', 0)
+                    fail = max(total - win, 0)
+                    rate = win / total if total else 0.5
+                    weight = ((1 + win * 4) / (1 + fail * 3)) * (max(rate, 0.05) ** 2)
+                    weights.append(max(0.01, weight))
+                proxy_url = random.choices(available, weights=weights, k=1)[0]
+                self._proxy_usage[proxy_url] = self._proxy_usage.get(proxy_url, 0) + 1
+            self.thread_local._proxy = proxy_url
+            return proxy_url
+
         with self._state_lock:
             available = []
             for p in cfg['ports']:

@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { Delete, Download, Edit, Message, Refresh, UploadFilled } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { outlookGateway, type OutlookAccount, type OutlookMessage, type OutlookProxy, type OutlookRegisterSnapshot } from '@/services/outlookGateway'
+import { outlookGateway, type OutlookAccount, type OutlookMessage, type OutlookPoolCheckConfig, type OutlookPoolItem, type OutlookPoolStats, type OutlookProxy, type OutlookRegisterSnapshot } from '@/services/outlookGateway'
 import type { ProxyGroupSummary } from '@/types'
 
 const rows = ref<OutlookAccount[]>([])
@@ -22,7 +22,22 @@ const resultRows = ref<Array<{ email: string; oauthStatus: string; graphStatus: 
 const proxyTotal = ref(0)
 const registerLogs = ref<Array<{ createdAt: string; level: string; line: string }>>([])
 const registerAction = ref(false)
-const registerConfig = ref<Record<string, any>>({})
+const registerConfig = ref<Record<string, any>>({
+  execution_mode: 'auto', tasks: 1, concurrent_flows: 1, headless: false,
+  proxy: { source: 'mongo', mode: 'mongo', group: '', max_per_proxy: 20 },
+  oauth2: { enable_oauth2: true, redirect_url: 'https://localhost', scopes: [] },
+  temp_mail: { enabled: false, base_url: '', domain: '', code_timeout: 120, poll_interval: 3 },
+})
+const poolStats = ref<OutlookPoolStats | null>(null)
+const poolRows = ref<OutlookPoolItem[]>([])
+const poolCategory = ref('all')
+const poolSearch = ref('')
+const poolSelectedIds = ref<string[]>([])
+const poolBusy = ref(false)
+const poolCheckConfig = ref<OutlookPoolCheckConfig | null>(null)
+const poolSubCount = ref(1)
+const poolTagPrefix = ref('')
+const poolOtp = ref<Record<string, string>>({})
 
 const proxyGroupCount = computed(() => proxyGroups.value.length)
 const registrationSummary = computed(() => {
@@ -37,16 +52,30 @@ function statusType(value: string) {
   return 'info'
 }
 
+let taskTimer: number | undefined
+
+async function refreshTaskState() {
+  try {
+    const [status, logs] = await Promise.all([outlookGateway.registerStatus(), outlookGateway.registerLogs()])
+    registerStatus.value = status
+    registerConfig.value = { ...registerConfig.value, ...(status.config || {}), proxy: { ...(registerConfig.value.proxy || {}), ...(status.config?.proxy || {}) } }
+    registerLogs.value = logs.items
+  } catch { /* the main refresh displays transport failures */ }
+}
+
 async function refresh() {
   loading.value = true
   try {
-    const [page, migrationResult, result, proxyPage, groups, status] = await Promise.all([
+    const [page, migrationResult, result, proxyPage, groups, status, poolStatsResult, poolPage, poolConfigResult] = await Promise.all([
       outlookGateway.list({ page: 1, pageSize: 200, q: search.value, poolStatus: filter.value }),
       outlookGateway.migration(),
       outlookGateway.results(100, search.value),
       outlookGateway.proxies(1, 100),
       outlookGateway.proxyGroups(),
       outlookGateway.registerStatus(),
+      outlookGateway.poolStats(),
+      outlookGateway.poolAccounts({ category: poolCategory.value, keyword: poolSearch.value, page: 1, page_size: 200 }),
+      outlookGateway.oauthCheckConfig(),
     ])
     rows.value = page.items
     migration.value = migrationResult.summary || migrationResult
@@ -55,7 +84,10 @@ async function refresh() {
     proxyTotal.value = proxyPage.total
     proxyGroups.value = groups
     registerStatus.value = status
-    registerConfig.value = status.config || {}
+    registerConfig.value = { ...registerConfig.value, ...(status.config || {}), proxy: { ...(registerConfig.value.proxy || {}), ...(status.config?.proxy || {}) } }
+    poolStats.value = poolStatsResult.stats
+    poolRows.value = poolPage.items
+    poolCheckConfig.value = poolConfigResult.config
     registerLogs.value = (await outlookGateway.registerLogs()).items
     if (selected.value) selected.value = rows.value.find((item) => item.id === selected.value?.id) || null
   } catch (error) {
@@ -97,9 +129,10 @@ async function runRegisterAction(action: 'start' | 'stop' | 'reset') {
   try {
     const result = action === 'start' ? await outlookGateway.startRegister() : action === 'stop' ? await outlookGateway.stopRegister() : await outlookGateway.resetRegister()
     registerStatus.value = result
-    registerConfig.value = result.config || registerConfig.value
+    registerConfig.value = { ...registerConfig.value, ...(result.config || {}), proxy: { ...(registerConfig.value.proxy || {}), ...(result.config?.proxy || {}) } }
     registerLogs.value = (await outlookGateway.registerLogs()).items
-    ElMessage.success(action === 'start' ? 'Outlook 任务已启动' : action === 'stop' ? 'Outlook 任务已停止' : 'Outlook 任务已重置')
+    const stopMessage = result.status === 'stopping' ? '已发送停止请求，等待浏览器收尾' : 'Outlook 任务已停止'
+    ElMessage.success(action === 'start' ? 'Outlook 任务已启动' : action === 'stop' ? stopMessage : 'Outlook 任务已重置')
   } catch (error) { ElMessage.error(error instanceof Error ? error.message : '任务操作失败') }
   finally { registerAction.value = false }
 }
@@ -152,6 +185,115 @@ async function exportAccounts(ids?: string[]) {
   } catch (error) { ElMessage.error(error instanceof Error ? error.message : '导出失败') }
 }
 
+function onPoolSelection(selection: OutlookPoolItem[]) {
+  poolSelectedIds.value = selection.map((item) => item.id)
+}
+
+async function refreshPool() {
+  try {
+    const [stats, page, config] = await Promise.all([
+      outlookGateway.poolStats(),
+      outlookGateway.poolAccounts({ category: poolCategory.value, keyword: poolSearch.value, page: 1, page_size: 200 }),
+      outlookGateway.oauthCheckConfig(),
+    ])
+    poolStats.value = stats.stats
+    poolRows.value = page.items
+    poolCheckConfig.value = config.config
+  } catch (error) { ElMessage.error(error instanceof Error ? error.message : '邮箱池读取失败') }
+}
+
+async function generateSubEmails(row?: OutlookPoolItem) {
+  const ids = row ? [row.id] : poolSelectedIds.value
+  if (!ids.length) { ElMessage.warning('请先选择 Outlook 主账号') ; return }
+  poolBusy.value = true
+  try {
+    const result = row
+      ? await outlookGateway.generateSubEmails(row.id, poolSubCount.value, poolTagPrefix.value)
+      : await outlookGateway.batchGenerateSubEmails(ids, poolSubCount.value, poolTagPrefix.value)
+    const created = Array.isArray((result as any).created)
+      ? (result as any).created.length
+      : Number((result as any).success ?? (result as any).created ?? 0)
+    const failed = Number((result as any).failed ?? 0)
+    ElMessage[failed ? 'warning' : 'success'](`子邮箱已生成 ${created} 个${failed ? `，失败 ${failed} 个` : ''}`)
+    await refreshPool()
+  } catch (error) { ElMessage.error(error instanceof Error ? error.message : '子邮箱生成失败') }
+  finally { poolBusy.value = false }
+}
+
+async function checkPoolOauth() {
+  if (!poolSelectedIds.value.length) { ElMessage.warning('请先选择需要检查的邮箱') ; return }
+  poolBusy.value = true
+  try {
+    const result = await outlookGateway.batchCheckPoolOauth(poolSelectedIds.value)
+    const count = result.total ?? result.processed ?? result.checked ?? poolSelectedIds.value.length
+    if (result.ok === false) ElMessage.warning(result.error || 'OAuth 检查未完成')
+    else ElMessage.success(`OAuth 检查完成：${count} 个`)
+    await refreshPool()
+    await refresh()
+  } catch (error) { ElMessage.error(error instanceof Error ? error.message : 'OAuth 检查失败') }
+  finally { poolBusy.value = false }
+}
+
+async function savePoolCheckConfig() {
+  if (!poolCheckConfig.value) return
+  poolBusy.value = true
+  try {
+    const result = await outlookGateway.updateOauthCheckConfig({ enabled: poolCheckConfig.value.enabled, interval_sec: poolCheckConfig.value.interval_sec, delay_ms: poolCheckConfig.value.delay_ms })
+    poolCheckConfig.value = result.config
+    ElMessage.success('OAuth 定时检查配置已保存')
+  } catch (error) { ElMessage.error(error instanceof Error ? error.message : 'OAuth 定时配置保存失败') }
+  finally { poolBusy.value = false }
+}
+
+async function deletePoolSelection() {
+  if (!poolSelectedIds.value.length) { ElMessage.warning('请先选择可删除的邮箱') ; return }
+  try {
+    await ElMessageBox.confirm(`删除已选择的 ${poolSelectedIds.value.length} 项？已分配或已预留项目会由服务拒绝。`, '删除邮箱池项目', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' })
+    poolBusy.value = true
+    const result = await outlookGateway.deletePoolItems(poolSelectedIds.value)
+    ElMessage.success(`已删除 ${result.deleted} 项`)
+    poolSelectedIds.value = []
+    await refreshPool()
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') ElMessage.error(error instanceof Error ? error.message : '删除失败')
+  } finally { poolBusy.value = false }
+}
+
+async function exportPool(category: string) {
+  try {
+    const text = await outlookGateway.exportPool(category, poolSelectedIds.value)
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }))
+    link.download = `outlook-${category}.txt`
+    link.click()
+    URL.revokeObjectURL(link.href)
+  } catch (error) { ElMessage.error(error instanceof Error ? error.message : '邮箱池导出失败') }
+}
+
+function poolToken(row: OutlookPoolItem) {
+  const value = row.receiveUrl || ''
+  return value.split('/').filter(Boolean).pop() || ''
+}
+
+async function loadPoolOtp(row: OutlookPoolItem) {
+  const token = poolToken(row)
+  if (!token) return
+  try {
+    const result = await outlookGateway.receive(token)
+    poolOtp.value[row.id] = result.latest_code || (result.codes || [])[0] || '暂无验证码'
+  } catch (error) { ElMessage.error(error instanceof Error ? error.message : '验证码读取失败') }
+}
+
+async function copyPoolUrl(row: OutlookPoolItem) {
+  if (!row.receiveUiUrl) return
+  try {
+    await navigator.clipboard.writeText(row.receiveUiUrl)
+    ElMessage.success('接码地址已复制')
+  } catch {
+    await ElMessageBox.alert(escapeHtml(row.receiveUiUrl), '接码地址（请手动复制）', { dangerouslyUseHTMLString: true, confirmButtonText: '关闭' })
+  }
+}
+
 async function editAccount(row: OutlookAccount) {
   const fields: Array<['password' | 'clientId' | 'refreshToken', string, string]> = [
     ['password', '登录密码', '留空则保持原值'],
@@ -190,7 +332,16 @@ async function removeAccount(row: OutlookAccount) {
   }
 }
 
-onMounted(() => void refresh())
+onMounted(() => {
+  void refresh()
+  taskTimer = window.setInterval(() => {
+    if (registerStatus.value?.enabled || registerStatus.value?.status === 'stopping') void refreshTaskState()
+  }, 2000)
+})
+
+onUnmounted(() => {
+  if (taskTimer !== undefined) window.clearInterval(taskTimer)
+})
 </script>
 
 <template>
@@ -208,7 +359,7 @@ onMounted(() => void refresh())
     </el-alert>
 
     <el-card shadow="never">
-      <template #header><div class="card-header"><strong>Outlook 授权账号任务</strong><span class="muted">独立于 GPT 任务；处理主 MongoDB 中已有授权账号，执行 OAuth/Graph 校验并发布邮箱池</span></div></template>
+      <template #header><div class="card-header"><strong>Outlook 注册与授权任务</strong><span class="muted">独立于 GPT 任务；按执行模式运行浏览器注册、OAuth/Graph 校验，并将结果写入 MongoDB 邮箱池</span></div></template>
       <div class="task-actions">
         <el-button type="primary" :loading="registerAction" :disabled="registerStatus?.enabled" @click="runRegisterAction('start')">启动</el-button>
         <el-button :loading="registerAction" :disabled="!registerStatus?.enabled" @click="runRegisterAction('stop')">停止</el-button>
@@ -216,6 +367,14 @@ onMounted(() => void refresh())
         <span class="muted">状态：{{ registerStatus?.status || 'idle' }} · 日志 {{ registerStatus?.log_count || 0 }} 条</span>
       </div>
       <el-form inline label-width="90px" class="task-config">
+        <el-form-item label="执行模式">
+          <el-select v-model="registerConfig.execution_mode" style="width: 180px">
+            <el-option label="自动选择" value="auto" />
+            <el-option label="仅注册引擎" value="registration" />
+            <el-option label="仅校验 OAuth" value="authorized" />
+            <el-option label="注册后再校验" value="both" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="任务数"><el-input-number v-model="registerConfig.tasks" :min="1" :max="100000" /></el-form-item>
         <el-form-item label="并发"><el-input-number v-model="registerConfig.concurrent_flows" :min="1" :max="64" /></el-form-item>
         <el-form-item label="无头"><el-switch v-model="registerConfig.headless" /></el-form-item>
@@ -248,6 +407,65 @@ onMounted(() => void refresh())
         <el-table-column label="代理地址" min-width="230"><template #default="{ row }">{{ row.scheme }}://{{ row.host }}:{{ row.port }}</template></el-table-column>
         <el-table-column prop="status" label="状态" width="110" />
         <el-table-column label="启用" width="80"><template #default="{ row }">{{ row.enabled ? '是' : '否' }}</template></el-table-column>
+      </el-table>
+    </el-card>
+
+    <el-card shadow="never" class="pool-card">
+      <template #header>
+        <div class="card-header"><strong>Outlook 邮箱池与接码</strong><span class="muted">运行数据来自 MongoDB；旧 Results 文件不参与运行时读取</span></div>
+      </template>
+      <div class="pool-stats">
+        <el-tag>总数 {{ poolStats?.total || 0 }}</el-tag>
+        <el-tag type="success">已注册 {{ poolStats?.registered || 0 }}</el-tag>
+        <el-tag type="success">OAuth2 {{ poolStats?.oauth2 || 0 }}</el-tag>
+        <el-tag type="warning">子邮箱 {{ poolStats?.sub || 0 }}</el-tag>
+        <el-tag type="danger">OAuth 异常 {{ poolStats?.oauth_bad || 0 }}</el-tag>
+      </div>
+      <div class="pool-toolbar">
+        <el-select v-model="poolCategory" style="width: 150px" @change="refreshPool">
+          <el-option label="全部" value="all" /><el-option label="已注册" value="registered" /><el-option label="OAuth2" value="oauth2" /><el-option label="子邮箱" value="sub" /><el-option label="已绑定恢复邮箱" value="recovery" />
+        </el-select>
+        <el-input v-model="poolSearch" clearable style="width: 240px" placeholder="搜索邮箱" @keyup.enter="refreshPool" />
+        <el-input-number v-model="poolSubCount" :min="1" :max="50" />
+        <el-input v-model="poolTagPrefix" style="width: 140px" placeholder="子邮箱标签前缀" />
+        <el-button type="primary" :loading="poolBusy" @click="generateSubEmails()">批量生成子邮箱</el-button>
+        <el-button :loading="poolBusy" @click="checkPoolOauth">批量 OAuth 检查</el-button>
+        <el-button :loading="poolBusy" @click="deletePoolSelection">删除选择</el-button>
+        <el-dropdown @command="exportPool">
+          <el-button :icon="Download">导出</el-button>
+          <template #dropdown><el-dropdown-menu><el-dropdown-item command="registered">已注册</el-dropdown-item><el-dropdown-item command="oauth2">OAuth2</el-dropdown-item><el-dropdown-item command="sub">子邮箱</el-dropdown-item><el-dropdown-item command="recovery">恢复邮箱</el-dropdown-item></el-dropdown-menu></template>
+        </el-dropdown>
+      </div>
+      <div v-if="poolCheckConfig" class="pool-check-config">
+        <el-switch v-model="poolCheckConfig.enabled" active-text="启用定时 OAuth 检查" />
+        <el-input-number v-model="poolCheckConfig.interval_sec" :min="300" :max="604800" />
+        <span class="muted">秒间隔</span>
+        <el-button size="small" :loading="poolBusy" @click="savePoolCheckConfig">保存定时配置</el-button>
+        <span class="muted">{{ poolCheckConfig.last_result ? `上次：${JSON.stringify(poolCheckConfig.last_result)}` : '尚未运行' }}</span>
+      </div>
+      <el-table :data="poolRows" size="small" row-key="id" @selection-change="onPoolSelection" empty-text="邮箱池暂无数据">
+        <el-table-column type="selection" width="44" />
+        <el-table-column prop="category" label="分类" width="95" />
+        <el-table-column prop="email" label="邮箱" min-width="220" />
+        <el-table-column prop="parentEmail" label="主账号" min-width="200" />
+        <el-table-column prop="oauthStatus" label="OAuth" width="100" />
+        <el-table-column prop="status" label="状态" width="100" />
+        <el-table-column label="接码" min-width="250">
+          <template #default="{ row }">
+            <template v-if="row.receiveUrl">
+              <el-button size="small" @click="loadPoolOtp(row)">查 OTP</el-button>
+              <el-button size="small" @click="copyPoolUrl(row)">复制地址</el-button>
+              <span class="otp-value">{{ poolOtp[row.id] || '—' }}</span>
+            </template>
+            <span v-else class="muted">主账号</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="180" fixed="right">
+          <template #default="{ row }">
+            <el-button v-if="row.category !== 'sub'" size="small" @click="generateSubEmails(row)">生成子邮箱</el-button>
+            <el-button v-if="row.receiveUiUrl" size="small" @click="copyPoolUrl(row)">接码地址</el-button>
+          </template>
+        </el-table-column>
       </el-table>
     </el-card>
 
@@ -304,7 +522,10 @@ onMounted(() => void refresh())
 .filters :deep(.el-input) { width: min(360px, 70vw); }
 .filters :deep(.el-select) { width: 210px; }
 .form-actions { justify-content: flex-start; margin-top: 12px; }
-.task-actions, .task-config { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.task-actions, .task-config, .pool-toolbar, .pool-check-config, .pool-stats { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.pool-card :deep(.el-table) { margin-top: 12px; }
+.pool-stats { margin-bottom: 0; }
+.otp-value { margin-left: 6px; font-weight: 700; color: var(--el-color-danger); }
 .proxy-table { margin-top: 12px; }
 .muted { color: var(--el-text-color-secondary); font-size: 12px; }
 </style>

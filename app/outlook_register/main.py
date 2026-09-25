@@ -28,6 +28,8 @@ _RUNTIME = {
     'interrupt_requested': False,
     # Web RegisterService 注入的 JobControl；CLI 为 None
     'job_control': None,
+    # 主 Register 注入后，运行期结果直接写入 Mongo，不再写 Results 文件。
+    'result_sink': None,
 }
 
 
@@ -134,6 +136,21 @@ def append_oauth_result(
     # 运行时读取，避免 configure_oauth2 后仍写死导入时的 CLIENT_ID
     import controllers.oauth2 as oauth2_mod
     client_id = getattr(oauth2_mod, 'CLIENT_ID', None) or CLIENT_ID
+    sink = _RUNTIME.get('result_sink')
+    if sink is not None:
+        sink({
+            'kind': 'oauth2',
+            'email': email,
+            'password': password,
+            'client_id': client_id,
+            'refresh_token': refresh_token,
+            'recovery_bound': bool(recovery_bound),
+            'recovery_email': recovery_email or '',
+            'country': country or '',
+            'country_zh': country_zh or '',
+            'proxy': proxy or '',
+        })
+        return
     os.makedirs(RESULTS_DIR, exist_ok=True)
     with RESULT_WRITE_LOCK:
         with open(os.path.join(RESULTS_DIR, 'oauth2.txt'), 'a', encoding='utf-8') as f:
@@ -166,6 +183,19 @@ def append_registered_result(
     proxy='',
 ):
     """注册成功进入邮箱页，但尚未拿到 OAuth2 token。"""
+    sink = _RUNTIME.get('result_sink')
+    if sink is not None:
+        sink({
+            'kind': 'registered',
+            'email': email,
+            'password': password,
+            'recovery_bound': bool(recovery_bound),
+            'recovery_email': recovery_email or '',
+            'country': country or '',
+            'country_zh': country_zh or '',
+            'proxy': proxy or '',
+        })
+        return
     os.makedirs(RESULTS_DIR, exist_ok=True)
     with RESULT_WRITE_LOCK:
         with open(os.path.join(RESULTS_DIR, 'registered.txt'), 'a', encoding='utf-8') as f:
@@ -847,10 +877,10 @@ def run_concurrent_flows(
         _RUNTIME['interrupt_requested'] = True
     finally:
         try:
-            executor.shutdown(wait=False, cancel_futures=True)
+            executor.shutdown(wait=_RUNTIME.get('result_sink') is not None, cancel_futures=True)
         except TypeError:
             # Python < 3.9 无 cancel_futures
-            executor.shutdown(wait=False)
+            executor.shutdown(wait=_RUNTIME.get('result_sink') is not None)
         except Exception:
             pass
 
@@ -869,12 +899,13 @@ def run_concurrent_flows(
     return succeeded_tasks, failed_tasks
 
 
-def run_registration_job(data, control=None, clear_profiles=True, install_signals=False):
+def run_registration_job(data, control=None, clear_profiles=True, install_signals=False, result_sink=None):
     """可调用的注册批循环（CLI 与 Web 共用）。
 
     Args:
         data: 已解析的 config dict
         control: JobControl 实例；Web 服务注入以支持 stop/stats 回调
+        result_sink: 主服务结果回调；设置后不写入 legacy Results 文件。
         clear_profiles: 启动前是否清空 browser_profiles
         install_signals: 是否注册 SIGINT/SIGTERM（仅 CLI 为 True；Web 勿装）
 
@@ -883,6 +914,7 @@ def run_registration_job(data, control=None, clear_profiles=True, install_signal
     """
     control = control or CliControl()
     _RUNTIME['job_control'] = control
+    _RUNTIME['result_sink'] = result_sink
     clear_interrupt()
     _RUNTIME['cleaned'] = False
 
@@ -1177,6 +1209,7 @@ def run_registration_job(data, control=None, clear_profiles=True, install_signal
         except Exception:
             pass
         _RUNTIME['job_control'] = None
+        _RUNTIME['result_sink'] = None
         try:
             control.set_controller(None)
         except Exception:

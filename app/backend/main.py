@@ -36,6 +36,7 @@ from .email_change_service import EmailChangeService
 from .email_change_store import MongoEmailChangeStore
 from .outlook_service import OutlookService, OutlookStore, migrate_legacy_outlook_data
 from .outlook_register_task_service import OutlookRegisterTaskService
+from .outlook_pool_service import OutlookPoolService
 from .mailcom_service import MailComService
 from .mongo_manager import MongoManager
 from .payment_tools import (
@@ -225,6 +226,7 @@ def create_app(
     resource_service = ResourceService(resource_store)
     outlook_store = OutlookStore(resource_store)
     outlook_service = OutlookService(outlook_store)
+    outlook_pool_service = OutlookPoolService(resource_store, outlook_store, outlook_service)
     outlook_register_tasks = OutlookRegisterTaskService(
         resource_store,
         result_sink=outlook_store,
@@ -290,6 +292,7 @@ def create_app(
     mongo.add_reconnect_callback(resource_store.ensure_indexes)
     mongo.add_reconnect_callback(outlook_store.ensure_indexes)
     mongo.add_reconnect_callback(outlook_register_tasks.ensure_indexes)
+    mongo.add_reconnect_callback(outlook_pool_service.ensure_indexes)
     mongo.add_reconnect_callback(mailcom_service.ensure_indexes)
     mongo.add_reconnect_callback(run_manager.recover)
     mongo.add_reconnect_callback(probe_store.ensure_indexes)
@@ -305,6 +308,12 @@ def create_app(
             await resource_store.ensure_indexes()
             await outlook_store.ensure_indexes()
             await outlook_register_tasks.ensure_indexes()
+            await outlook_pool_service.ensure_indexes()
+            try:
+                if (await outlook_pool_service.get_oauth_check_config()).get("enabled"):
+                    outlook_pool_service.start_scheduler()
+            except Exception:
+                pass
             await mailcom_service.ensure_indexes()
             try:
                 _app.state.outlook_migration_fallback = await migrate_legacy_outlook_data(outlook_store)
@@ -329,6 +338,7 @@ def create_app(
             await proxy_health_scheduler.stop()
             await run_manager.shutdown()
             await outlook_register_tasks.close()
+            await outlook_pool_service.stop_scheduler()
             await account_pipeline.stop()
             for task in tuple(email_change_tasks):
                 task.cancel()
@@ -380,6 +390,7 @@ def create_app(
     app.state.outlook_store = outlook_store
     app.state.outlook_service = outlook_service
     app.state.outlook_register_tasks = outlook_register_tasks
+    app.state.outlook_pool_service = outlook_pool_service
     app.state.mailcom_service = mailcom_service
     async def get_outlook_migration_status():
         document = await resource_store.manager.database["outlook_migrations"].find_one({"_id": "legacy-outlook-v1"}, {"summary": 1, "lastRunAt": 1})

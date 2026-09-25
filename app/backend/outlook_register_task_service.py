@@ -1,19 +1,23 @@
 from __future__ import annotations
 
-"""Durable Outlook task state and the main-service authorized-account worker.
+"""Durable Outlook task state and the main-service Outlook execution bridge.
 
-The task is deliberately separate from the GPT run store. Its built-in worker
-operates on Outlook accounts already present in MongoDB and validates their
-OAuth/Graph access before publishing them to the shared mailbox pool. Consumer
-account creation remains outside this service boundary.
+The task is deliberately separate from the GPT run store. It can validate
+credential-bearing accounts already present in MongoDB and, when configured,
+run the existing browser registration engine with Mongo-backed result and
+proxy adapters.
 """
 
 import asyncio
 import copy
+import inspect
+import re
+import sys
 import threading
 from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from typing import Any, Protocol
+from urllib.parse import unquote, urlsplit
 from uuid import uuid4
 
 from .resource_service import MongoResourceStore, utc_now
@@ -21,10 +25,20 @@ from .resource_service import MongoResourceStore, utc_now
 
 TASK_ID = "outlook-register"
 ACTIVE_STATUSES = {"running", "stopping"}
+STOP_TIMEOUT_SECONDS = 5
 DEFAULT_FAILURE_STATS = {
     "adapter_disabled": 0,
     "executor_error": 0,
 }
+
+
+def _redact_outlook_log(value: Any) -> str:
+    """Keep task logs useful without persisting account/proxy credentials."""
+    text = str(value or "")
+    text = re.sub(r"(?i)(https?://)[^/@\s]+:[^/@\s]+@", r"\1[redacted]@", text)
+    text = re.sub(r"(?i)(?<![\w])([A-Za-z0-9_.-]+):([^@\s:]+)@((?:[A-Za-z0-9_.-]+|\[[^]]+\]):\d+)", r"[redacted]@\3", text)
+    text = re.sub(r"(?i)\b(refresh[_-]?token|access[_-]?token|password|secret|client[_-]?id|authorization|cookie)\b\s*([=:])\s*[^\s,;]+", r"\1\2[redacted]", text)
+    return text[:2000]
 
 
 def _iso(value: Any = None) -> str:
@@ -53,6 +67,10 @@ def _default_config() -> dict[str, Any]:
             "oauth2": {"enable_oauth2": True, "redirect_url": "https://localhost", "Scopes": []},
             "temp_mail": {"enabled": False, "base_url": "", "domain": "", "code_timeout": 120, "poll_interval": 3},
         }
+    # This setting belongs to the main-service task, not the legacy JSON
+    # runner.  Keep old config files valid while making the dispatch policy
+    # explicit in Mongo and in the console.
+    config["execution_mode"] = str(config.get("execution_mode") or "auto").strip().lower()
     return config
 
 
@@ -64,6 +82,10 @@ def _normalize_config(value: Mapping[str, Any] | None) -> dict[str, Any]:
         config = normalize_config(raw)
     except (TypeError, ValueError) as exc:
         raise ValueError(str(exc)) from exc
+    execution_mode = str(config.get("execution_mode") or "auto").strip().lower()
+    if execution_mode not in {"auto", "registration", "authorized", "both"}:
+        raise ValueError("execution_mode 只能是 auto / registration / authorized / both")
+    config["execution_mode"] = execution_mode
     proxy = config.setdefault("proxy", {})
     proxy["source"] = str(proxy.get("source") or "mongo").strip().lower()
     if proxy["source"] not in {"mongo", "legacy"}:
@@ -120,6 +142,127 @@ class OutlookRegistrationDisabled:
         control.on_log("[Outlook] 注册执行适配器未启用；仅完成任务生命周期检查", "WARN")
         control.on_stats({}, {"adapter_disabled": 1}, {"status": "disabled"})
         return {"status": "disabled", "reason": "registration_adapter_disabled"}
+
+
+class OutlookRegistrationEngineAdapter:
+    """Run the existing Outlook registration engine inside the main service.
+
+    The legacy engine remains the implementation of the browser/OAuth flow,
+    while this adapter supplies the main task control, Mongo result sink and
+    Mongo proxy candidates.  The engine's Results files and JSON pool are
+    bypassed for this runtime path.
+    """
+
+    def __init__(self, outlook_store: Any, outlook_service: Any) -> None:
+        self.outlook_store = outlook_store
+        self.outlook_service = outlook_service
+
+    @staticmethod
+    def _proxy_mapping(value: str) -> dict[str, Any] | None:
+        raw = str(value or "").strip()
+        if not raw:
+            return None
+        parsed = urlsplit(raw)
+        if not parsed.hostname or parsed.port is None:
+            return None
+        return {
+            "scheme": parsed.scheme or "http",
+            "host": parsed.hostname,
+            "port": parsed.port,
+            "username": unquote(parsed.username or ""),
+            "password": unquote(parsed.password or ""),
+        }
+
+    def _load_runner(self) -> Any:
+        # Do not import the legacy entry point as top-level ``main``: uvicorn
+        # deployments and test runners may already have a different module by
+        # that name.  Keep the old ``controllers`` imports working by exposing
+        # its directory on sys.path, but load the runner under a stable alias.
+        from pathlib import Path
+        from importlib.util import module_from_spec, spec_from_file_location
+
+        root = Path(__file__).resolve().parents[1] / "outlook_register"
+        root_text = str(root)
+        if root_text not in sys.path:
+            sys.path.insert(0, root_text)
+        module_name = "register_outlook_runtime"
+        module = sys.modules.get(module_name)
+        if module is None:
+            spec = spec_from_file_location(module_name, root / "main.py")
+            if spec is None or spec.loader is None:
+                raise RuntimeError("无法加载 Outlook 注册执行引擎")
+            module = module_from_spec(spec)
+            sys.modules[module_name] = module
+            try:
+                spec.loader.exec_module(module)
+            except Exception:
+                # Do not leave a half-imported runner cached after a failed
+                # dependency import; a later task must be able to retry cleanly.
+                sys.modules.pop(module_name, None)
+                raise
+        runner = getattr(module, "run_registration_job", None)
+        if runner is None:
+            raise RuntimeError("Outlook 注册引擎缺少 run_registration_job")
+        return module, runner
+
+    def __call__(self, config: dict[str, Any], control: "OutlookTaskControl") -> Mapping[str, Any]:
+        proxy = config.get("proxy") if isinstance(config.get("proxy"), Mapping) else {}
+        if str(proxy.get("source") or "mongo") == "mongo" and not list(proxy.get("candidates") or []):
+            raise ValueError("主 MongoDB 所选代理组没有可用代理，未启动浏览器注册引擎")
+        module, runner = self._load_runner()
+        controller_type = getattr(module, "OutlookController", None)
+        if controller_type is not None:
+            controller_type.set_log_sink(control.on_log)
+
+        def sink(payload: Mapping[str, Any]) -> None:
+            # The legacy engine invokes this callback from its worker thread;
+            # synchronously bridge the Mongo write so completion means durable.
+            control.call(self._persist_result(dict(payload), control))
+
+        try:
+            control.on_log("[Outlook] 浏览器注册执行引擎已启用")
+            result = runner(
+                copy.deepcopy(config),
+                control=control,
+                clear_profiles=True,
+                install_signals=False,
+                result_sink=sink,
+            )
+            summary = dict(result or {})
+            return {"status": "interrupted" if summary.get("interrupted") else "completed", **summary}
+        finally:
+            if controller_type is not None:
+                controller_type.set_log_sink(None)
+
+    async def _persist_result(self, payload: Mapping[str, Any], control: "OutlookTaskControl") -> None:
+        kind = str(payload.get("kind") or "registered")
+        email = str(payload.get("email") or "").strip()
+        if not email:
+            await control.log("[Outlook] 注册引擎返回空邮箱，结果已跳过", "WARN")
+            return
+        proxy_url = str(payload.get("proxy") or "")
+        account_id, _ = await self.outlook_store.store_registration_result(
+            email=email,
+            password=str(payload.get("password") or ""),
+            client_id=str(payload.get("client_id") or ""),
+            refresh_token=str(payload.get("refresh_token") or ""),
+            oauth=kind == "oauth2",
+            recovery_bound=bool(payload.get("recovery_bound")),
+            recovery_email=str(payload.get("recovery_email") or ""),
+            country=str(payload.get("country") or ""),
+            proxy=proxy_url,
+        )
+        if kind == "oauth2" and payload.get("refresh_token") and payload.get("client_id"):
+            check = await self.outlook_service.check_graph(
+                account_id,
+                proxy=self._proxy_mapping(proxy_url),
+            )
+            if check.get("ok"):
+                await control.log(f"[Outlook] {email} 注册结果已写入 Mongo，Graph 校验通过并发布邮箱池", "OK")
+            else:
+                await control.log(f"[Outlook] {email} 注册结果已写入 Mongo，但 Graph 校验失败：{str(check.get('error') or 'unknown')[:180]}", "WARN")
+        else:
+            await control.log(f"[Outlook] {email} 注册结果已写入 Mongo（待 OAuth）", "OK")
 
 
 class OutlookAuthorizedAccountAdapter:
@@ -189,6 +332,122 @@ class OutlookAuthorizedAccountAdapter:
         return {"status": "completed", "processed": submitted}
 
 
+class _OutlookStatsOffsetControl:
+    """Preserve registration counts while the authorized phase reports progress."""
+
+    def __init__(self, control: "OutlookTaskControl", base: Mapping[str, Any]) -> None:
+        self._control = control
+        self._base = {key: int(base.get(key) or 0) for key in ("submitted", "succeeded", "failed")}
+
+    def should_stop(self) -> bool:
+        return self._control.should_stop()
+
+    async def log(self, line: str, level: str | None = None) -> None:
+        await self._control.log(line, level)
+
+    def on_log(self, line: str, level: str | None = None) -> None:
+        self._control.on_log(line, level)
+
+    @staticmethod
+    def _merge(runtime: Mapping[str, Any] | None, base: Mapping[str, int]) -> dict[str, Any]:
+        result = dict(runtime or {})
+        for key in ("submitted", "succeeded", "failed"):
+            if key in result and result[key] is not None:
+                result[key] = int(result[key] or 0) + int(base.get(key) or 0)
+        return result
+
+    async def stats(self, runtime_stats: Mapping[str, Any] | None, failure_stats: Mapping[str, Any] | None, extra: Mapping[str, Any] | None = None) -> None:
+        await self._control.stats(self._merge(runtime_stats, self._base), failure_stats, extra)
+
+    def on_stats(self, runtime_stats: Mapping[str, Any] | None, failure_stats: Mapping[str, Any] | None, extra: Mapping[str, Any] | None = None) -> None:
+        self._control.on_stats(self._merge(runtime_stats, self._base), failure_stats, extra)
+
+    def on_batch(self, batch_index: int, total_succeeded: int, total_failed: int, total_submitted: int) -> None:
+        self._control.on_batch(batch_index, total_succeeded + self._base["succeeded"], total_failed + self._base["failed"], total_submitted + self._base["submitted"])
+
+    def call(self, coroutine: Any) -> Any:
+        return self._control.call(coroutine)
+
+    def set_controller(self, controller: Any) -> None:
+        self._control.set_controller(controller)
+
+
+class OutlookRegistrationUnifiedAdapter:
+    """Dispatch the complete Outlook task without silently disabling execution.
+
+    ``auto`` preserves the existing imported-account workflow when Mongo has
+    OAuth credentials, and falls back to the legacy browser registration engine
+    when it does not.  The other modes make the choice explicit for operators
+    and tests.
+    """
+
+    MODES = {"auto", "registration", "authorized", "both"}
+
+    def __init__(self, outlook_store: Any, outlook_service: Any) -> None:
+        self.outlook_service = outlook_service
+        self.engine = OutlookRegistrationEngineAdapter(outlook_store, outlook_service)
+        self.authorized = OutlookAuthorizedAccountAdapter(outlook_service)
+
+    async def _authorized_candidates(self, config: Mapping[str, Any]) -> list[dict[str, Any]]:
+        task_limit = max(1, int(config.get("tasks") or 1))
+        success_limit = config.get("success_tasks")
+        if success_limit is not None:
+            task_limit = min(task_limit, max(1, int(success_limit)))
+        return await self.outlook_service.store.registration_candidates(limit=task_limit)
+
+    async def _run_registration(self, config: dict[str, Any], control: "OutlookTaskControl") -> Mapping[str, Any]:
+        # The legacy engine is synchronous and owns its browser threads. Run it
+        # outside the FastAPI event loop, while its callbacks still bridge back
+        # through OutlookTaskControl to persist Mongo state.
+        runner = asyncio.create_task(asyncio.to_thread(self.engine, config, control))
+        try:
+            result = await asyncio.shield(runner)
+        except asyncio.CancelledError:
+            control.stop_event.set()
+            # Cancellation of the coordinator must not orphan the browser
+            # worker.  Wait for its cooperative cleanup before propagating.
+            await runner
+            raise
+        return dict(result or {})
+
+    async def run_async(self, config: dict[str, Any], control: "OutlookTaskControl") -> Mapping[str, Any]:
+        mode = str(config.get("execution_mode") or "auto").strip().lower()
+        if mode not in self.MODES:
+            raise ValueError(f"不支持的 Outlook 执行模式: {mode}")
+
+        if mode == "authorized":
+            await control.log("[Outlook] 执行模式=authorized：仅校验 Mongo 中已有 OAuth 账号")
+            return await self.authorized.run_async(config, control)
+
+        if mode == "registration":
+            await control.log("[Outlook] 执行模式=registration：启动浏览器注册执行引擎")
+            return await self._run_registration(config, control)
+
+        if mode == "both":
+            await control.log("[Outlook] 执行模式=both：先执行浏览器注册，再校验 Mongo OAuth 账号")
+            registration = await self._run_registration(config, control)
+            if control.should_stop() or str(registration.get("status") or "") in {"failed", "interrupted"}:
+                return registration
+            base = {key: int(registration.get(key) or 0) for key in ("submitted", "succeeded", "failed")}
+            authorized = await self.authorized.run_async(config, _OutlookStatsOffsetControl(control, base))
+            return {
+                "status": str(authorized.get("status") or registration.get("status") or "completed"),
+                "submitted": base["submitted"] + int(authorized.get("submitted") or 0),
+                "succeeded": base["succeeded"] + int(authorized.get("succeeded") or 0),
+                "failed": base["failed"] + int(authorized.get("failed") or 0),
+                "registration": registration,
+                "authorized": authorized,
+            }
+
+        candidates = await self._authorized_candidates(config)
+        if candidates:
+            await control.log(f"[Outlook] 执行模式=auto：发现 {len(candidates)} 个 Mongo OAuth 账号，执行授权校验")
+            return await self.authorized.run_async(config, control)
+
+        await control.log("[Outlook] 执行模式=auto：没有可校验的 Mongo OAuth 账号，启动浏览器注册执行引擎")
+        return await self._run_registration(config, control)
+
+
 class OutlookTaskControl:
     def __init__(self, service: "OutlookRegisterTaskService", task_id: str) -> None:
         self.service = service
@@ -211,11 +470,22 @@ class OutlookTaskControl:
     async def log(self, line: str, level: str | None = None) -> None:
         await self.service._append_log(self.task_id, line, level)
 
+    @staticmethod
+    def _progress_extra(extra: Mapping[str, Any] | None) -> dict[str, Any]:
+        # The legacy runner reports ``done``/``finished`` from progress
+        # callbacks.  Only the main task worker owns terminal transitions.
+        value = dict(extra or {})
+        value.pop("finished", None)
+        status = str(value.get("status") or "")
+        if status and status not in {"running"}:
+            value["status"] = "running"
+        return value
+
     async def stats(self, runtime_stats: Mapping[str, Any] | None, failure_stats: Mapping[str, Any] | None, extra: Mapping[str, Any] | None = None) -> None:
-        await self.service._apply_stats(self.task_id, runtime_stats or {}, failure_stats or {}, extra or {})
+        await self.service._apply_stats(self.task_id, runtime_stats or {}, failure_stats or {}, self._progress_extra(extra))
 
     def on_stats(self, runtime_stats: Mapping[str, Any] | None, failure_stats: Mapping[str, Any] | None, extra: Mapping[str, Any] | None = None) -> None:
-        self.service._schedule(self.service._apply_stats(self.task_id, runtime_stats or {}, failure_stats or {}, extra or {}))
+        self.service._schedule(self.service._apply_stats(self.task_id, runtime_stats or {}, failure_stats or {}, self._progress_extra(extra)))
 
     def on_batch(self, batch_index: int, total_succeeded: int, total_failed: int, total_submitted: int) -> None:
         self.on_stats(
@@ -240,7 +510,9 @@ class OutlookRegisterTaskService:
         self.resources = resources
         self.manager = resources.manager
         self.adapter = adapter or (
-            OutlookAuthorizedAccountAdapter(outlook_service)
+            OutlookRegistrationUnifiedAdapter(result_sink, outlook_service)
+            if result_sink is not None and outlook_service is not None
+            else OutlookAuthorizedAccountAdapter(outlook_service)
             if outlook_service is not None
             else OutlookRegistrationDisabled()
         )
@@ -249,8 +521,11 @@ class OutlookRegisterTaskService:
         self._async_task: asyncio.Task[Any] | None = None
         self._control: OutlookTaskControl | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
-        self._pending_futures: set[asyncio.Future[Any]] = set()
+        self._pending_futures: set[Any] = set()
+        self._pending_lock = threading.Lock()
         self._lock = threading.RLock()
+        self._lifecycle_lock = asyncio.Lock()
+        self._stats_lock = asyncio.Lock()
         self._config_cache: dict[str, Any] | None = None
 
     @property
@@ -363,92 +638,110 @@ class OutlookRegisterTaskService:
         return candidates
 
     async def start(self) -> dict[str, Any]:
-        with self._lock:
-            if (self._thread and self._thread.is_alive()) or (self._async_task and not self._async_task.done()):
-                return await self.status()
-        config = await self._internal_config()
-        candidates = await self.resolve_proxy_candidates(config)
-        task = {
-            "_id": TASK_ID,
-            "status": "running",
-            "stats": {**_empty_stats(config), "status": "running", "started_at": _iso(), "updated_at": _iso()},
-            "failureStats": {},
-            "error": None,
-            "startedAt": _iso(),
-            "finishedAt": None,
-            "updatedAt": utc_now(),
-            "proxyGroup": str(config.get("proxy", {}).get("group") or ""),
-            "proxyCount": len(candidates),
-        }
-        await self.resources._guard(self.task_collection.update_one({"_id": TASK_ID}, {"$set": task}, upsert=True))
-        with self._lock:
-            self._loop = asyncio.get_running_loop()
-            self._control = OutlookTaskControl(self, TASK_ID)
-            runtime_config = copy.deepcopy(config)
-            # Credentials remain in the worker's memory only and never enter Mongo task state.
-            runtime_config.setdefault("proxy", {})["candidates"] = candidates
-            # The legacy controller still accepts a host/port config. The adapter
-            # receives the authoritative Mongo candidates separately.
-            runtime_config["proxy"]["mode"] = "mongo"
-            if hasattr(self.adapter, "run_async"):
-                self._async_task = asyncio.create_task(self._run_async_worker(runtime_config, self._control))
-            else:
-                self._thread = threading.Thread(target=self._run_worker, args=(runtime_config, self._control, self._loop), name="outlook-register-task", daemon=True)
-                self._thread.start()
-        return await self.status()
+        async with self._lifecycle_lock:
+            with self._lock:
+                if (self._thread and self._thread.is_alive()) or (self._async_task and not self._async_task.done()):
+                    return await self.status()
+            config = await self._internal_config()
+            candidates = await self.resolve_proxy_candidates(config)
+            task = {
+                "_id": TASK_ID,
+                "status": "running",
+                "stats": {**_empty_stats(config), "status": "running", "started_at": _iso(), "updated_at": _iso()},
+                "failureStats": {},
+                "error": None,
+                "startedAt": _iso(),
+                "finishedAt": None,
+                "updatedAt": utc_now(),
+                "proxyGroup": str(config.get("proxy", {}).get("group") or ""),
+                "proxyCount": len(candidates),
+            }
+            await self.resources._guard(self.task_collection.update_one({"_id": TASK_ID}, {"$set": task}, upsert=True))
+            with self._lock:
+                self._loop = asyncio.get_running_loop()
+                self._control = OutlookTaskControl(self, TASK_ID)
+                runtime_config = copy.deepcopy(config)
+                # Credentials remain in the worker's memory only and never enter Mongo task state.
+                runtime_config.setdefault("proxy", {})["candidates"] = candidates
+                if str(runtime_config["proxy"].get("source") or "mongo") == "mongo":
+                    runtime_config["proxy"]["mode"] = "mongo"
+                if hasattr(self.adapter, "run_async"):
+                    self._async_task = asyncio.create_task(self._run_async_worker(runtime_config, self._control))
+                else:
+                    self._thread = threading.Thread(target=self._run_worker, args=(runtime_config, self._control, self._loop), name="outlook-register-task", daemon=True)
+                    self._thread.start()
+            return await self.status()
 
     async def stop(self) -> dict[str, Any]:
-        with self._lock:
-            control = self._control
-            thread = self._thread
-            async_task = self._async_task
-        if ((not thread or not thread.is_alive()) and (not async_task or async_task.done())) or control is None:
-            try:
-                return await self.status()
-            except Exception:
-                return {"taskId": TASK_ID, "enabled": False, "status": "idle", "stats": _empty_stats(), "failure_stats": {}}
-        control.stop_event.set()
-        await self.resources._guard(self.task_collection.update_one({"_id": TASK_ID}, {"$set": {"status": "stopping", "updatedAt": utc_now()}}, upsert=True))
-        if thread and thread.is_alive():
-            await asyncio.to_thread(thread.join, 5)
-        if async_task and not async_task.done():
-            try:
-                await asyncio.wait_for(asyncio.shield(async_task), timeout=5)
-            except asyncio.TimeoutError:
-                async_task.cancel()
-                await asyncio.gather(async_task, return_exceptions=True)
-        return await self.status()
+        async with self._lifecycle_lock:
+            with self._lock:
+                control = self._control
+                thread = self._thread
+                async_task = self._async_task
+            if ((not thread or not thread.is_alive()) and (not async_task or async_task.done())) or control is None:
+                try:
+                    return await self.status()
+                except Exception:
+                    return {"taskId": TASK_ID, "enabled": False, "status": "idle", "stats": _empty_stats(), "failure_stats": {}}
+            control.stop_event.set()
+            await self._apply_stats(TASK_ID, {}, {}, {"status": "stopping"})
+            if thread and thread.is_alive():
+                await asyncio.to_thread(thread.join, STOP_TIMEOUT_SECONDS)
+            if async_task and not async_task.done():
+                try:
+                    await asyncio.wait_for(asyncio.shield(async_task), timeout=STOP_TIMEOUT_SECONDS)
+                except asyncio.TimeoutError:
+                    # The browser runner is still stopping cooperatively. Do not
+                    # cancel a to_thread task and orphan its browser threads.
+                    pass
+            return await self.status()
 
     async def reset(self) -> dict[str, Any]:
-        with self._lock:
-            if (self._thread and self._thread.is_alive()) or (self._async_task and not self._async_task.done()):
-                raise RuntimeError("Outlook 注册任务运行中，先停止任务")
-        config = await self._internal_config()
-        await self.resources._guard(self.task_collection.update_one({"_id": TASK_ID}, {"$set": {"status": "idle", "stats": _empty_stats(config), "failureStats": {}, "error": None, "startedAt": None, "finishedAt": None, "updatedAt": utc_now()}}, upsert=True))
-        await self.resources._guard(self.log_collection.delete_many({"taskId": TASK_ID}))
-        return await self.status()
+        async with self._lifecycle_lock:
+            with self._lock:
+                if (self._thread and self._thread.is_alive()) or (self._async_task and not self._async_task.done()):
+                    raise RuntimeError("Outlook 注册任务运行中，先停止任务")
+            config = await self._internal_config()
+            await self.resources._guard(self.task_collection.update_one({"_id": TASK_ID}, {"$set": {"status": "idle", "stats": _empty_stats(config), "failureStats": {}, "error": None, "startedAt": None, "finishedAt": None, "updatedAt": utc_now()}}, upsert=True))
+            await self.resources._guard(self.log_collection.delete_many({"taskId": TASK_ID}))
+            return await self.status()
 
     def _schedule(self, coroutine: Any) -> None:
         loop = self._loop
         if loop is None or loop.is_closed():
+            if inspect.iscoroutine(coroutine):
+                coroutine.close()
             return
         try:
             future = asyncio.run_coroutine_threadsafe(coroutine, loop)
-            # Keep scheduled Mongo writes alive even when the worker exits.
-            self._pending_futures.add(future)
-            future.add_done_callback(lambda item: self._pending_futures.discard(item))
         except RuntimeError:
+            if inspect.iscoroutine(coroutine):
+                coroutine.close()
             return
+        with self._pending_lock:
+            self._pending_futures.add(future)
+        def _discard(item: Any) -> None:
+            with self._pending_lock:
+                self._pending_futures.discard(item)
+        future.add_done_callback(_discard)
 
     async def _append_log(self, task_id: str, line: str, level: str | None = None) -> None:
-        text = str(line or "").strip()
+        text = _redact_outlook_log(line).strip()
         if not text:
             return
         level = level or ("WARN" if "WARN" in text.upper() else "INFO")
         await self.resources._guard(self.log_collection.insert_one({"_id": uuid4().hex, "taskId": task_id, "createdAt": utc_now(), "level": level, "line": text[:2000]}))
 
     async def _apply_stats(self, task_id: str, runtime: Mapping[str, Any], failures: Mapping[str, Any], extra: Mapping[str, Any]) -> None:
+        async with self._stats_lock:
+            await self._apply_stats_unlocked(task_id, runtime, failures, extra)
+
+    async def _apply_stats_unlocked(self, task_id: str, runtime: Mapping[str, Any], failures: Mapping[str, Any], extra: Mapping[str, Any]) -> None:
         row = await self.resources._guard(self.task_collection.find_one({"_id": task_id})) or {}
+        # Once the owner has written a terminal state, a late browser callback
+        # must not reopen the task or mutate its final status.
+        if row.get("finishedAt") is not None and not extra.get("finished"):
+            return
         stats = dict(row.get("stats") or {})
         for key in ("submitted", "running", "succeeded", "failed", "batch_index", "tasks", "success_tasks", "concurrent_flows", "elapsed_seconds"):
             if key in runtime and runtime[key] is not None:
@@ -456,7 +749,10 @@ class OutlookRegisterTaskService:
         stats.update({key: extra[key] for key in ("batch_index", "tasks", "success_tasks", "concurrent_flows") if key in extra})
         done = int(stats.get("succeeded") or 0) + int(stats.get("failed") or 0)
         stats["success_rate"] = round(int(stats.get("succeeded") or 0) * 100 / max(done, 1), 1)
-        stats["status"] = str(extra.get("status") or row.get("status") or stats.get("status") or "running")
+        requested_status = str(extra.get("status") or row.get("status") or stats.get("status") or "running")
+        if row.get("status") == "stopping" and requested_status not in {"completed", "failed", "interrupted", "disabled"}:
+            requested_status = "stopping"
+        stats["status"] = requested_status
         stats["updated_at"] = _iso()
         current_failures = dict(row.get("failureStats") or {})
         for key, value in failures.items():
@@ -466,20 +762,36 @@ class OutlookRegisterTaskService:
                 continue
         changes: dict[str, Any] = {"stats": stats, "failureStats": current_failures, "updatedAt": utc_now()}
         if extra.get("status"):
-            changes["status"] = extra["status"]
+            changes["status"] = requested_status
         if extra.get("finished"):
+            stats["running"] = 0
             changes["finishedAt"] = utc_now()
             stats["finished_at"] = _iso()
         await self.resources._guard(self.task_collection.update_one({"_id": task_id}, {"$set": changes}, upsert=True))
 
+    async def _drain_pending(self) -> None:
+        # Engine callbacks are scheduled from browser worker threads. Drain in
+        # rounds so a final progress callback cannot overwrite completed state.
+        while True:
+            with self._pending_lock:
+                pending = tuple(self._pending_futures)
+            if not pending:
+                return
+            await asyncio.gather(*(asyncio.wrap_future(item) for item in pending), return_exceptions=True)
+
+
     async def _run_async_worker(self, config: dict[str, Any], control: OutlookTaskControl) -> None:
         try:
             result = dict(await self.adapter.run_async(config, control) or {})
+            await self._drain_pending()
             status = str(result.get("status") or "completed")
+            if control.should_stop() and status != "failed":
+                status = "interrupted"
             if status not in {"completed", "interrupted", "failed"}:
                 status = "completed"
             await self._apply_stats(TASK_ID, {}, {}, {"status": status, "finished": True})
         except asyncio.CancelledError:
+            await self._drain_pending()
             await self._apply_stats(TASK_ID, {}, {}, {"status": "interrupted", "finished": True})
             raise
         except Exception as exc:
@@ -491,18 +803,36 @@ class OutlookRegisterTaskService:
                 self._control = None
                 self._async_task = None
 
+    async def _finish_sync_worker(self, status: str, failures: Mapping[str, Any] | None = None, error: str | None = None) -> None:
+        await self._drain_pending()
+        await self._apply_stats(TASK_ID, {}, failures or {}, {"status": status, "finished": True})
+        if error:
+            await self._set_error(TASK_ID, error)
+
     def _run_worker(self, config: dict[str, Any], control: OutlookTaskControl, loop: asyncio.AbstractEventLoop) -> None:
+        status = "completed"
+        failures: dict[str, int] = {}
+        error: str | None = None
         try:
             result = self.adapter(config, control)
             result = dict(result or {})
             status = str(result.get("status") or "completed")
             if status not in {"completed", "disabled", "interrupted", "failed"}:
                 status = "completed"
-            self._schedule(self._apply_stats(TASK_ID, {}, {}, {"status": status, "finished": True}))
         except Exception as exc:
             control.on_log(f"[Outlook] 任务异常: {type(exc).__name__}", "ERROR")
-            self._schedule(self._apply_stats(TASK_ID, {}, {"executor_error": 1}, {"status": "failed", "finished": True}))
-            self._schedule(self._set_error(TASK_ID, "outlook_registration_task_failed"))
+            status = "failed"
+            failures["executor_error"] = 1
+            error = "outlook_registration_task_failed"
+        try:
+            # Run finalization directly from this worker rather than scheduling
+            # a tracked future that would wait on itself in _drain_pending().
+            if control.should_stop() and status != "failed":
+                status = "interrupted"
+            control.call(self._finish_sync_worker(status, failures, error))
+        except Exception:
+            # The event loop may be closing during process shutdown.
+            pass
         finally:
             with self._lock:
                 self._control = None
@@ -519,14 +849,11 @@ class OutlookRegisterTaskService:
         if control is not None:
             control.stop_event.set()
         if thread and thread.is_alive():
-            await asyncio.to_thread(thread.join, 5)
+            await asyncio.to_thread(thread.join)
         if async_task and not async_task.done():
-            async_task.cancel()
             await asyncio.gather(async_task, return_exceptions=True)
         # Let scheduled Mongo updates finish before the event loop is torn down.
-        pending = tuple(self._pending_futures)
-        if pending:
-            await asyncio.gather(*(asyncio.wrap_future(item) for item in pending), return_exceptions=True)
+        await self._drain_pending()
 
     async def record_oauth_result(self, *, email: str, password: str, refresh_token: str, client_id: str, proxy: str = "", country: str = "") -> None:
         if self.result_sink is None:

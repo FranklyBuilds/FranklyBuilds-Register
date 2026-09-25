@@ -9,12 +9,12 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote, unquote, urlsplit
 from uuid import uuid4
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 from pymongo.errors import DuplicateKeyError
 
@@ -72,6 +72,36 @@ class OutlookEditBody(BaseModel):
 
 class OutlookExportBody(BaseModel):
     ids: list[str] | None = Field(default=None, max_length=5000)
+
+
+class OutlookPoolSubGenerateBody(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+    count: int = Field(default=1, ge=1, le=50)
+    tag_prefix: str = Field(default="", validation_alias=AliasChoices("tag_prefix", "tagPrefix"), max_length=20)
+
+
+class OutlookPoolBatchBody(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+    ids: list[str] = Field(default_factory=list, max_length=5000)
+    count: int = Field(default=1, ge=1, le=50)
+    tag_prefix: str = Field(default="", validation_alias=AliasChoices("tag_prefix", "tagPrefix"), max_length=20)
+
+
+class OutlookPoolDeleteBody(BaseModel):
+    ids: list[str] = Field(default_factory=list, max_length=5000)
+
+
+class OutlookPoolExportBody(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+    category: str = Field(min_length=1, max_length=20)
+    ids: list[str] | None = Field(default=None, max_length=5000)
+    country: str | None = Field(default=None, max_length=2)
+
+
+class OutlookOAuthCheckBody(BaseModel):
+    enabled: bool | None = None
+    interval_sec: int | None = Field(default=None, ge=300, le=604800)
+    delay_ms: int | None = Field(default=None, ge=0, le=5000)
 
 
 class GraphCheckResponse(BaseModel):
@@ -243,6 +273,10 @@ class OutlookStore:
         source: str = "manual",
         oauth_status: str = "unknown",
         graph_status: str = "unknown",
+        recovery_email: str = "",
+        recovery_bound: bool = False,
+        country: str = "",
+        proxy: str = "",
     ) -> tuple[str, bool]:
         normalized = normalize_email(email)
         if not EMAIL_RE.fullmatch(normalized):
@@ -263,6 +297,10 @@ class OutlookStore:
             "lastError": None,
             "poolStatus": "not_published",
             "source": source,
+            "recoveryEmail": str(recovery_email or ""),
+            "recoveryBound": bool(recovery_bound),
+            "country": str(country or "").strip().upper(),
+            "registrationProxy": str(proxy or ""),
             "createdAt": now,
             "updatedAt": now,
         }
@@ -312,8 +350,48 @@ class OutlookStore:
             )
         if not existing.get("password") and password:
             updates["password"] = str(password)
+        if recovery_email and not existing.get("recoveryEmail"):
+            updates["recoveryEmail"] = str(recovery_email)
+        if recovery_bound and not existing.get("recoveryBound"):
+            updates["recoveryBound"] = True
+        if country and not existing.get("country"):
+            updates["country"] = str(country).strip().upper()
+        if proxy and not existing.get("registrationProxy"):
+            updates["registrationProxy"] = str(proxy)
         await self.resources._guard(self.accounts.update_one({"_id": existing["_id"]}, {"$set": updates}))
         return str(existing["_id"]), False
+
+    async def store_registration_result(
+        self,
+        *,
+        email: str,
+        password: str = "",
+        client_id: str = "",
+        refresh_token: str = "",
+        oauth: bool = False,
+        recovery_bound: bool = False,
+        recovery_email: str = "",
+        country: str = "",
+        proxy: str = "",
+    ) -> tuple[str, bool]:
+        """Persist a legacy registration-engine result in Mongo.
+
+        This is the runtime sink for the integrated engine.  The legacy
+        Results files are intentionally not involved here.
+        """
+        return await self.upsert_account(
+            email=email,
+            password=password,
+            client_id=client_id,
+            refresh_token=refresh_token,
+            source="registration",
+            oauth_status="ok" if oauth and refresh_token else ("missing" if not refresh_token else "unknown"),
+            graph_status="unknown",
+            recovery_email=recovery_email,
+            recovery_bound=recovery_bound,
+            country=country,
+            proxy=proxy,
+        )
 
     async def update_validation(
         self,
@@ -486,6 +564,22 @@ class OutlookService:
         auth = f"{username}:{password}@" if username or password else ""
         return f"{scheme}://{auth}{host}:{port}"
 
+    @classmethod
+    def _proxy_from_account(cls, account: Mapping[str, Any]) -> dict[str, Any] | None:
+        raw = str(account.get("registrationProxy") or "").strip()
+        if not raw:
+            return None
+        parsed = urlsplit(raw)
+        if not parsed.hostname or parsed.port is None:
+            return None
+        return {
+            "scheme": parsed.scheme or "http",
+            "host": parsed.hostname,
+            "port": parsed.port,
+            "username": unquote(parsed.username or ""),
+            "password": unquote(parsed.password or ""),
+        }
+
     async def _refresh(self, account: dict[str, Any], *, proxy: Mapping[str, Any] | None = None) -> dict[str, Any]:
         refresh = str(account.get("refreshToken") or "")
         client_id = str(account.get("clientId") or "")
@@ -532,6 +626,7 @@ class OutlookService:
 
     async def check_oauth(self, account_id: str, *, proxy: Mapping[str, Any] | None = None) -> dict[str, Any]:
         account = await self.store.get(account_id)
+        proxy = proxy or self._proxy_from_account(account)
         try:
             tokens = await self._refresh(account, proxy=proxy)
         except PermissionError as exc:
@@ -566,6 +661,7 @@ class OutlookService:
 
     async def check_graph(self, account_id: str, *, proxy: Mapping[str, Any] | None = None) -> dict[str, Any]:
         account = await self.store.get(account_id)
+        proxy = proxy or self._proxy_from_account(account)
         try:
             tokens = await self._refresh(account, proxy=proxy)
         except PermissionError as exc:
@@ -644,11 +740,20 @@ class OutlookService:
         if not result.get("ok"):
             raise RuntimeError(str(result.get("error") or "Graph identity check failed"))
 
-    async def messages(self, account_id: str, *, folder: str = "inbox", top: int = 20) -> dict[str, Any]:
+    async def messages(
+        self,
+        account_id: str,
+        *,
+        folder: str = "inbox",
+        top: int = 20,
+        recipient: str | None = None,
+        proxy: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
         account = await self.store.get(account_id)
+        proxy = proxy or self._proxy_from_account(account)
         await self._ensure_graph_identity(account)
         try:
-            tokens = await self._refresh(account)
+            tokens = await self._refresh(account, proxy=proxy)
         except PermissionError as exc:
             status = "expired" if str(exc) == "expired" else "error"
             await self.store.update_validation(account_id, oauth_status=status, graph_status="unknown", error="OAuth token expired" if status == "expired" else "OAuth refresh failed")
@@ -663,7 +768,8 @@ class OutlookService:
             page = await self._graph_get(
                 f"/me/mailFolders/{safe_folder}/messages",
                 tokens["access_token"],
-                {"$top": max(1, min(int(top), 50)), "$orderby": "receivedDateTime desc", "$select": "id,subject,from,toRecipients,receivedDateTime,isRead,bodyPreview,hasAttachments"},
+                {"$top": max(1, min(int(top), 50)), "$orderby": "receivedDateTime desc", "$select": "id,subject,from,toRecipients,ccRecipients,receivedDateTime,isRead,bodyPreview,hasAttachments"},
+                proxy=proxy,
             )
         except PermissionError:
             await self.store.update_validation(account_id, oauth_status="expired", graph_status="unknown", error="OAuth token expired")
@@ -672,8 +778,18 @@ class OutlookService:
             await self.store.update_validation(account_id, oauth_status="ok", graph_status="error", refresh_token=tokens["refresh_token"], error="Microsoft Graph inbox read failed")
             raise
         messages = []
+        recipient_needle = normalize_email(recipient) if recipient else ""
         for item in page.get("value") or []:
             sender = ((item.get("from") or {}).get("emailAddress") or {})
+            if recipient_needle:
+                addresses = []
+                for key in ("toRecipients", "ccRecipients"):
+                    addresses.extend(
+                        normalize_email(str(((entry.get("emailAddress") or {}).get("address") or "")))
+                        for entry in item.get(key) or []
+                    )
+                if recipient_needle not in addresses:
+                    continue
             messages.append({
                 "id": str(item.get("id") or ""), "subject": str(item.get("subject") or "(无主题)"),
                 "from": str(sender.get("address") or ""), "fromName": str(sender.get("name") or ""),
@@ -683,11 +799,19 @@ class OutlookService:
         await self.store.update_validation(account_id, oauth_status="ok", refresh_token=tokens["refresh_token"], error=None)
         return {"email": account["email"], "messages": messages}
 
-    async def message_detail(self, account_id: str, message_id: str) -> dict[str, Any]:
+    async def message_detail(
+        self,
+        account_id: str,
+        message_id: str,
+        *,
+        recipient: str | None = None,
+        proxy: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
         account = await self.store.get(account_id)
+        proxy = proxy or self._proxy_from_account(account)
         await self._ensure_graph_identity(account)
         try:
-            tokens = await self._refresh(account)
+            tokens = await self._refresh(account, proxy=proxy)
         except PermissionError as exc:
             status = "expired" if str(exc) == "expired" else "error"
             await self.store.update_validation(account_id, oauth_status=status, graph_status="unknown", error="OAuth token expired" if status == "expired" else "OAuth refresh failed")
@@ -698,7 +822,8 @@ class OutlookService:
         try:
             payload = await self._graph_get(
                 f"/me/messages/{quote(message_id, safe='')}", tokens["access_token"],
-                {"$select": "id,subject,from,toRecipients,receivedDateTime,isRead,body,bodyPreview,hasAttachments"},
+                {"$select": "id,subject,from,toRecipients,ccRecipients,receivedDateTime,isRead,body,bodyPreview,hasAttachments"},
+                proxy=proxy,
             )
         except PermissionError:
             await self.store.update_validation(account_id, oauth_status="expired", graph_status="unknown", error="OAuth token expired")
@@ -706,6 +831,14 @@ class OutlookService:
         except Exception:
             await self.store.update_validation(account_id, oauth_status="ok", graph_status="error", refresh_token=tokens["refresh_token"], error="Microsoft Graph message read failed")
             raise
+        if recipient:
+            addresses = {
+                normalize_email(str((entry.get("emailAddress") or {}).get("address") or ""))
+                for key in ("toRecipients", "ccRecipients")
+                for entry in payload.get(key) or []
+            }
+            if normalize_email(recipient) not in addresses:
+                raise ResourceNotFoundError("该邮件不属于此接码邮箱")
         sender = ((payload.get("from") or {}).get("emailAddress") or {})
         body = payload.get("body") or {}
         await self.store.update_validation(account_id, oauth_status="ok", refresh_token=tokens["refresh_token"], error=None)
@@ -717,14 +850,22 @@ class OutlookService:
             "bodyType": str(body.get("contentType") or "text"),
         }}
 
-    async def mailbox_snapshot(self, account_id: str, email: str, *, purpose: str = "verification") -> MailboxSnapshot:
+    async def mailbox_snapshot(
+        self,
+        account_id: str,
+        email: str,
+        *,
+        purpose: str = "verification",
+        proxy: Mapping[str, Any] | None = None,
+    ) -> MailboxSnapshot:
         account = await self.store.get(account_id)
+        proxy = proxy or self._proxy_from_account(account)
         await self._ensure_graph_identity(account)
         account = await self.store.get(account_id)
         if normalize_email(email) != normalize_email(str(account.get("email") or "")):
             raise MailboxClientError("mailbox_account_mismatch", "Outlook 邮箱与账号关联不匹配")
         try:
-            tokens = await self._refresh(account)
+            tokens = await self._refresh(account, proxy=proxy)
         except PermissionError as exc:
             status = "expired" if str(exc) == "expired" else "error"
             message = "OAuth token expired" if status == "expired" else "OAuth refresh failed"
@@ -747,6 +888,7 @@ class OutlookService:
                     "$orderby": "receivedDateTime desc",
                     "$select": "id,subject,from,toRecipients,ccRecipients,receivedDateTime,bodyPreview,body",
                 },
+                proxy=proxy,
             )
         except PermissionError:
             await self.store.update_validation(
@@ -852,6 +994,184 @@ class OutlookService:
         async def list_shared_proxy_groups(request: Request):
             request.app.state.mongo_manager.require_online()
             return await request.app.state.resource_store.proxy_group_summaries()
+
+        # Outlook mailbox-pool compatibility surface. Runtime reads and writes
+        # are Mongo-backed; the old Results/pool.json files are migration-only.
+        @router.get("/api/outlook/pool/stats")
+        @router.get("/api/pool/stats")
+        async def outlook_pool_stats(request: Request):
+            request.app.state.mongo_manager.require_online()
+            return {"stats": await request.app.state.outlook_pool_service.stats()}
+
+        @router.get("/api/outlook/pool/accounts")
+        @router.get("/api/pool/accounts")
+        async def outlook_pool_accounts(
+            request: Request,
+            category: str = "all",
+            keyword: str = "",
+            country: str = "",
+            age: str = "",
+            oauth_status: str = Query("", alias="oauth_status"),
+            page: int = Query(1, ge=1),
+            page_size: int = Query(50, alias="page_size", ge=1, le=200),
+        ):
+            request.app.state.mongo_manager.require_online()
+            return await request.app.state.outlook_pool_service.list_accounts(
+                category=category, keyword=keyword, country=country, age=age,
+                oauth_status=oauth_status, page=page, page_size=page_size,
+            )
+
+        @router.get("/api/outlook/pool/accounts/{account_id}")
+        @router.get("/api/pool/accounts/{account_id}")
+        async def outlook_pool_account_detail(account_id: str, request: Request):
+            request.app.state.mongo_manager.require_online()
+            try:
+                return {"account": await request.app.state.outlook_pool_service.get_detail(account_id)}
+            except ResourceNotFoundError as exc:
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+        @router.post("/api/outlook/pool/accounts/{account_id}/sub-emails")
+        @router.post("/api/pool/accounts/{account_id}/sub-emails")
+        async def outlook_pool_generate_subs(account_id: str, body: OutlookPoolSubGenerateBody, request: Request):
+            request.app.state.mongo_manager.require_online()
+            try:
+                return await request.app.state.outlook_pool_service.generate_sub_emails(
+                    account_id, count=body.count, tag_prefix=body.tag_prefix,
+                )
+            except (ResourceNotFoundError, ValueError) as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        @router.post("/api/outlook/pool/batch/sub-emails")
+        @router.post("/api/pool/batch/sub-emails")
+        async def outlook_pool_batch_subs(body: OutlookPoolBatchBody, request: Request):
+            request.app.state.mongo_manager.require_online()
+            if not body.ids:
+                raise HTTPException(status_code=400, detail="请选择账号")
+            return await request.app.state.outlook_pool_service.batch_generate_sub_emails(
+                body.ids, count=body.count, tag_prefix=body.tag_prefix,
+            )
+
+        @router.post("/api/outlook/pool/batch/check-oauth")
+        @router.post("/api/pool/batch/check-oauth")
+        async def outlook_pool_batch_check(body: OutlookPoolDeleteBody, request: Request):
+            request.app.state.mongo_manager.require_online()
+            if not body.ids:
+                raise HTTPException(status_code=400, detail="请选择账号")
+            return await request.app.state.outlook_pool_service.run_oauth_check(ids=body.ids, source="manual")
+
+        @router.delete("/api/outlook/pool/accounts")
+        @router.delete("/api/pool/accounts")
+        async def outlook_pool_delete(body: OutlookPoolDeleteBody, request: Request):
+            request.app.state.mongo_manager.require_online()
+            return await request.app.state.outlook_pool_service.delete_ids(body.ids)
+
+        @router.post("/api/outlook/pool/export")
+        @router.post("/api/pool/export")
+        async def outlook_pool_export(body: OutlookPoolExportBody, request: Request):
+            request.app.state.mongo_manager.require_online()
+            remote = request.client.host if request.client else ""
+            if remote not in {"127.0.0.1", "::1"}:
+                raise HTTPException(status_code=403, detail="Outlook pool export is local-only")
+            try:
+                text = await request.app.state.outlook_pool_service.export_text(
+                    body.category, body.ids, country=body.country,
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            filename = {"registered": "registered.txt", "oauth2": "oauth2_export.txt", "sub": "sub_emails.txt", "recovery": "recovery_bound.txt"}.get(body.category, "outlook_export.txt")
+            return PlainTextResponse(
+                text,
+                headers={"Content-Disposition": f'attachment; filename="{filename}"', "Cache-Control": "no-store"},
+            )
+
+        @router.get("/api/outlook/pool/export")
+        @router.get("/api/pool/export")
+        async def outlook_pool_export_get(request: Request, category: str = "oauth2", country: str = ""):
+            # FastAPI injects Request even though the compatibility query shape
+            # is intentionally kept identical to the old manager.
+            request.app.state.mongo_manager.require_online()
+            remote = request.client.host if request.client else ""
+            if remote not in {"127.0.0.1", "::1"}:
+                raise HTTPException(status_code=403, detail="Outlook pool export is local-only")
+            try:
+                text = await request.app.state.outlook_pool_service.export_text(category, country=country or None)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            return PlainTextResponse(text, headers={"Cache-Control": "no-store"})
+
+        @router.get("/api/outlook/pool/config/oauth-check")
+        @router.get("/api/pool/config/oauth-check")
+        async def outlook_pool_oauth_config(request: Request):
+            request.app.state.mongo_manager.require_online()
+            return {"config": await request.app.state.outlook_pool_service.get_oauth_check_config()}
+
+        @router.post("/api/outlook/pool/config/oauth-check")
+        @router.put("/api/outlook/pool/config/oauth-check")
+        @router.post("/api/pool/config/oauth-check")
+        async def outlook_pool_update_oauth_config(body: OutlookOAuthCheckBody, request: Request):
+            request.app.state.mongo_manager.require_online()
+            return {"ok": True, "config": await request.app.state.outlook_pool_service.update_oauth_check_config(body.model_dump(exclude_unset=True))}
+
+        @router.post("/api/outlook/pool/accounts/{account_id}/check-oauth")
+        @router.post("/api/pool/accounts/{account_id}/check-oauth")
+        async def outlook_pool_check_oauth(account_id: str, request: Request):
+            request.app.state.mongo_manager.require_online()
+            try:
+                parent_id = await request.app.state.outlook_pool_service.resolve_parent_id(account_id)
+                return await request.app.state.outlook_service.check_oauth(parent_id)
+            except ResourceNotFoundError as exc:
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+        @router.get("/api/outlook/pool/accounts/{account_id}/messages")
+        @router.get("/api/pool/accounts/{account_id}/messages")
+        async def outlook_pool_messages(account_id: str, request: Request, folder: str = "inbox", top: int = Query(20, ge=1, le=50)):
+            request.app.state.mongo_manager.require_online()
+            try:
+                detail = await request.app.state.outlook_pool_service.get_detail(account_id)
+                parent_id = str(detail.get("parentId") or detail.get("id") or account_id)
+                recipient = str(detail.get("email") or "") if detail.get("category") == "sub" else None
+                return await request.app.state.outlook_service.messages(parent_id, folder=folder, top=top, recipient=recipient)
+            except ResourceNotFoundError as exc:
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+            except Exception as exc:
+                raise HTTPException(status_code=502, detail="Graph 邮件读取失败") from exc
+
+        @router.get("/api/outlook/pool/receive/{token}")
+        @router.get("/api/pool/receive/{token}")
+        async def outlook_pool_receive(token: str, request: Request, folder: str = "inbox", top: int = Query(10, ge=1, le=30), format: str = "json"):
+            request.app.state.mongo_manager.require_online()
+            try:
+                payload = await request.app.state.outlook_pool_service.receive_payload(token, folder=folder, top=top)
+            except ResourceNotFoundError as exc:
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+            if format == "text":
+                return PlainTextResponse("\n".join([
+                    f"email: {payload.get('email')}",
+                    f"latest_code: {payload.get('latest_code') or ''}",
+                    f"codes: {','.join(payload.get('codes') or [])}",
+                    f"messages: {len(payload.get('messages') or [])}",
+                    f"ui: {payload.get('receive_ui_url')}",
+                ]) + "\n", headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
+            return JSONResponse(payload, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
+
+        @router.get("/api/outlook/pool/receive/{token}/message/{message_id}")
+        @router.get("/api/pool/receive/{token}/message/{message_id}")
+        async def outlook_pool_receive_message(token: str, message_id: str, request: Request):
+            request.app.state.mongo_manager.require_online()
+            try:
+                payload = await request.app.state.outlook_pool_service.receive_message(token, message_id)
+                return JSONResponse(payload, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
+            except ResourceNotFoundError as exc:
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+            except Exception as exc:
+                raise HTTPException(status_code=502, detail="Graph 邮件详情读取失败") from exc
+
+        @router.get("/r/{token}", include_in_schema=False)
+        async def outlook_receive_ui(token: str):
+            if not re.fullmatch(r"[A-Za-z0-9_-]{16,128}", token):
+                raise HTTPException(status_code=404, detail="接码地址无效")
+            token_json = json.dumps(token, ensure_ascii=False)
+            return HTMLResponse(f"""<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Outlook 接码</title><style>body{{font-family:system-ui,sans-serif;background:#f5f7fb;color:#182230;margin:0;padding:24px}}main{{max-width:900px;margin:auto;background:white;border-radius:12px;padding:20px;box-shadow:0 8px 30px #0001}}button{{padding:8px 14px;border:0;border-radius:8px;background:#2563eb;color:#fff;cursor:pointer}}.code{{font-size:28px;font-weight:700;color:#b42318;margin:14px 0}}.msg{{border-top:1px solid #eee;padding:12px 0}}.muted{{color:#667085}}</style></head><body><main><h2>Outlook 接码</h2><div id=\"email\" class=\"muted\"></div><div id=\"code\" class=\"code\">验证码：加载中</div><button onclick=\"load()\">刷新</button><div id=\"list\"></div></main><script>const TOKEN={token_json};const esc=s=>String(s??'').replace(/[&<>\"']/g,c=>({{ '&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;' }})[c]);async function load(){{const r=await fetch('/api/outlook/pool/receive/'+encodeURIComponent(TOKEN));const d=await r.json();if(!r.ok){{document.getElementById('list').textContent=d.detail||'读取失败';return}}document.getElementById('email').textContent=d.email||'';document.getElementById('code').textContent='验证码：'+(d.latest_code||'暂无');document.getElementById('list').innerHTML=(d.messages||[]).map(m=>'<div class=\"msg\"><b>'+esc(m.subject)+'</b><div class=\"muted\">'+esc(m.receivedAt||'')+'</div><div>'+esc(m.preview||'')+'</div></div>').join('')||'<div class=\"muted\">暂无邮件</div>'}}load();setInterval(load,15000)</script></body></html>""", headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff"})
 
         @router.get("/api/outlook/results")
         async def list_outlook_results(
