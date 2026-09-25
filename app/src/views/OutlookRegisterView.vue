@@ -4,6 +4,8 @@ import { Delete, Download, Edit, Message, Refresh, UploadFilled } from '@element
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { outlookGateway, type OutlookAccount, type OutlookMessage, type OutlookPoolCheckConfig, type OutlookPoolItem, type OutlookPoolStats, type OutlookProxy, type OutlookRegisterSnapshot } from '@/services/outlookGateway'
 import type { ProxyGroupSummary } from '@/types'
+import OutlookOAuthConfig from '@/components/OutlookOAuthConfig.vue'
+import { useOutlookRegisterConfig } from '@/composables/useOutlookRegisterConfig'
 
 const rows = ref<OutlookAccount[]>([])
 const messages = ref<OutlookMessage[]>([])
@@ -22,12 +24,7 @@ const resultRows = ref<Array<{ email: string; oauthStatus: string; graphStatus: 
 const proxyTotal = ref(0)
 const registerLogs = ref<Array<{ createdAt: string; level: string; line: string }>>([])
 const registerAction = ref(false)
-const registerConfig = ref<Record<string, any>>({
-  execution_mode: 'auto', tasks: 1, concurrent_flows: 1, headless: false,
-  proxy: { source: 'mongo', mode: 'mongo', group: '', max_per_proxy: 20 },
-  oauth2: { enable_oauth2: true, redirect_url: 'https://localhost', scopes: [] },
-  temp_mail: { enabled: false, base_url: '', domain: '', code_timeout: 120, poll_interval: 3 },
-})
+const { config: registerConfig, dirty: registerConfigDirty, accept: acceptRegisterConfig, payload: registerConfigPayload, generation: registerConfigRevision } = useOutlookRegisterConfig()
 const poolStats = ref<OutlookPoolStats | null>(null)
 const poolRows = ref<OutlookPoolItem[]>([])
 const poolCategory = ref('all')
@@ -55,15 +52,17 @@ function statusType(value: string) {
 let taskTimer: number | undefined
 
 async function refreshTaskState() {
+  const configRevision = registerConfigRevision()
   try {
     const [status, logs] = await Promise.all([outlookGateway.registerStatus(), outlookGateway.registerLogs()])
     registerStatus.value = status
-    registerConfig.value = { ...registerConfig.value, ...(status.config || {}), proxy: { ...(registerConfig.value.proxy || {}), ...(status.config?.proxy || {}) } }
+    acceptRegisterConfig(status.config, false, configRevision)
     registerLogs.value = logs.items
   } catch { /* the main refresh displays transport failures */ }
 }
 
 async function refresh() {
+  const configRevision = registerConfigRevision()
   loading.value = true
   try {
     const [page, migrationResult, result, proxyPage, groups, status, poolStatsResult, poolPage, poolConfigResult] = await Promise.all([
@@ -84,7 +83,7 @@ async function refresh() {
     proxyTotal.value = proxyPage.total
     proxyGroups.value = groups
     registerStatus.value = status
-    registerConfig.value = { ...registerConfig.value, ...(status.config || {}), proxy: { ...(registerConfig.value.proxy || {}), ...(status.config?.proxy || {}) } }
+    acceptRegisterConfig(status.config, false, configRevision)
     poolStats.value = poolStatsResult.stats
     poolRows.value = poolPage.items
     poolCheckConfig.value = poolConfigResult.config
@@ -125,11 +124,16 @@ function escapeHtml(value: string) {
 
 
 async function runRegisterAction(action: 'start' | 'stop' | 'reset') {
+  const configRevision = registerConfigRevision()
+  if (action === 'start' && registerConfigDirty.value) {
+    ElMessage.warning('请先保存配置，再启动 Outlook 任务')
+    return
+  }
   registerAction.value = true
   try {
     const result = action === 'start' ? await outlookGateway.startRegister() : action === 'stop' ? await outlookGateway.stopRegister() : await outlookGateway.resetRegister()
     registerStatus.value = result
-    registerConfig.value = { ...registerConfig.value, ...(result.config || {}), proxy: { ...(registerConfig.value.proxy || {}), ...(result.config?.proxy || {}) } }
+    acceptRegisterConfig(result.config, false, configRevision)
     registerLogs.value = (await outlookGateway.registerLogs()).items
     const stopMessage = result.status === 'stopping' ? '已发送停止请求，等待浏览器收尾' : 'Outlook 任务已停止'
     ElMessage.success(action === 'start' ? 'Outlook 任务已启动' : action === 'stop' ? stopMessage : 'Outlook 任务已重置')
@@ -140,8 +144,8 @@ async function runRegisterAction(action: 'start' | 'stop' | 'reset') {
 async function saveRegisterConfig() {
   registerAction.value = true
   try {
-    const result = await outlookGateway.updateRegisterConfig(registerConfig.value)
-    registerConfig.value = result.config
+    const result = await outlookGateway.updateRegisterConfig(registerConfigPayload())
+    acceptRegisterConfig(result.config, true)
     ElMessage.success('Outlook 注册任务配置已保存')
     await refresh()
   } catch (error) { ElMessage.error(error instanceof Error ? error.message : '配置保存失败') }
@@ -366,7 +370,8 @@ onUnmounted(() => {
         <el-button :loading="registerAction" @click="runRegisterAction('reset')">重置</el-button>
         <span class="muted">状态：{{ registerStatus?.status || 'idle' }} · 日志 {{ registerStatus?.log_count || 0 }} 条</span>
       </div>
-      <el-form inline label-width="90px" class="task-config">
+      <p v-if="registerConfigDirty" role="status">有未保存的配置；轮询会保留草稿，启动前请先保存。</p>
+      <el-form inline label-width="90px" class="task-config" :disabled="registerAction">
         <el-form-item label="执行模式">
           <el-select v-model="registerConfig.execution_mode" style="width: 180px">
             <el-option label="自动选择" value="auto" />
@@ -379,6 +384,7 @@ onUnmounted(() => {
         <el-form-item label="并发"><el-input-number v-model="registerConfig.concurrent_flows" :min="1" :max="64" /></el-form-item>
         <el-form-item label="无头"><el-switch v-model="registerConfig.headless" /></el-form-item>
         <el-form-item label="代理分组"><el-input v-model="registerConfig.proxy.group" placeholder="默认组" /></el-form-item>
+        <OutlookOAuthConfig v-model="registerConfig.oauth2" />
         <el-form-item><el-button type="success" :loading="registerAction" @click="saveRegisterConfig">保存配置</el-button></el-form-item>
       </el-form>
       <el-table :data="registerLogs" size="small" max-height="180" empty-text="暂无任务日志">

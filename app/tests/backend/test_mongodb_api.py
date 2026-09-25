@@ -1897,3 +1897,21 @@ def test_successful_protocol_registration_keeps_assigned_outlook_mailbox_link() 
     assert "reservedBy" not in mailbox
     assert persisted_account["outlookAccountId"] == "outlook-1"
     assert persisted_account["emailAccessUrl"] == "outlook://outlook-1"
+
+
+@pytest.mark.parametrize("scopes", [["offline_access", "Mail.Read"], []])
+def test_outlook_config_public_scopes_replace_existing_scopes(scopes) -> None:
+    from backend.outlook_register_task_service import OutlookRegisterTaskService
+    manager = _OutlookFakeManager()
+    service = OutlookRegisterTaskService(MongoResourceStore(manager), adapter=lambda config, control: {})
+    async def scenario() -> None:
+        await service.update_config({"oauth2": {"client_id": "CLIENT_ID_FIXTURE", "Scopes": ["old.scope"]}})
+        saved = await service.update_config({"oauth2": {"scopes": scopes, "client_id": "", "clientIdConfigured": False}})
+        assert saved["oauth2"]["scopes"] == scopes
+        assert saved["oauth2"]["clientIdConfigured"] is True
+        assert "client_id" not in saved["oauth2"]
+        internal = await service._internal_config()
+        assert internal["oauth2"]["Scopes"] == scopes
+        assert internal["oauth2"]["client_id"] == "CLIENT_ID_FIXTURE"
+        assert "clientIdConfigured" not in internal["oauth2"]
+    asyncio.run(scenario())

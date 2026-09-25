@@ -559,6 +559,14 @@ class OutlookRegisterTaskService:
                 merged[key].update(copy.deepcopy(dict(item)))
             else:
                 merged[key] = copy.deepcopy(item)
+        # Normalize public scope updates before merging legacy engine fields.
+        incoming_oauth = value.get("oauth2")
+        if isinstance(incoming_oauth, Mapping) and "scopes" in incoming_oauth:
+            merged["oauth2"]["Scopes"] = copy.deepcopy(incoming_oauth["scopes"])
+            merged["oauth2"].pop("scopes", None)
+        for section, metadata in (("oauth2", "clientIdConfigured"), ("temp_mail", "adminPasswordConfigured")):
+            if isinstance(merged.get(section), dict):
+                merged[section].pop(metadata, None)
         # Blank secret fields mean "keep existing", not erase credentials.
         for section, field in (("oauth2", "client_id"), ("temp_mail", "admin_password")):
             incoming = merged.get(section, {}).get(field) if isinstance(merged.get(section), dict) else None

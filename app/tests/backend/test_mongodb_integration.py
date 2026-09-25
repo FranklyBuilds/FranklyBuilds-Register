@@ -804,3 +804,31 @@ def test_manager_recovers_without_recreating_client(tmp_path: Path) -> None:
         if first_process.poll() is None:
             first_process.terminate()
             first_process.wait(timeout=10)
+
+def test_outlook_oauth_configuration_round_trip_persists_public_scopes(mongo_client) -> None:
+    client, _ = mongo_client
+    response = client.put('/api/outlook/register', json={'oauth2': {
+        'client_id': 'CLIENT_ID_FIXTURE', 'Scopes': ['old.scope'],
+    }})
+    assert response.status_code == 200
+    manager = client.app.state.mongo_manager
+    database = manager.database.name
+    assert database.startswith('autoregister_test_')
+    for scopes in (['offline_access', 'Mail.Read'], []):
+        response = client.put('/api/outlook/register', json={'oauth2': {
+            'client_id': '', 'scopes': scopes, 'clientIdConfigured': False,
+        }})
+        assert response.status_code == 200
+        assert 'CLIENT_ID_FIXTURE' not in response.text
+        assert response.json()['config']['oauth2']['scopes'] == scopes
+        with MongoClient(MONGO_URI, serverSelectionTimeoutMS=2000) as db_client:
+            row = db_client[database]['outlook_register_config'].find_one({'_id': 'default'})
+            assert row['config']['oauth2']['Scopes'] == scopes
+            assert row['config']['oauth2']['client_id'] == 'CLIENT_ID_FIXTURE'
+            assert 'clientIdConfigured' not in row['config']['oauth2']
+        client.app.state.outlook_register_tasks._config_cache = None
+        public = client.get('/api/outlook/register')
+        assert public.status_code == 200
+        assert 'CLIENT_ID_FIXTURE' not in public.text
+        assert public.json()['config']['oauth2']['scopes'] == scopes
+        assert public.json()['config']['oauth2']['clientIdConfigured'] is True

@@ -37,8 +37,22 @@ export interface OutlookRegisterStats {
   submitted?: number; succeeded?: number; failed?: number; running?: number
   status?: string; tasks?: number; success_tasks?: number | null
 }
+export interface OutlookOAuthConfig {
+  enable_oauth2: boolean; redirect_url: string; scopes: string[] | string
+  client_id?: string; clientIdConfigured?: boolean
+}
+
+export interface OutlookRegisterConfig {
+  execution_mode: 'auto' | 'registration' | 'authorized' | 'both'
+  tasks: number; concurrent_flows: number; headless: boolean
+  proxy: { source: string; mode: string; group: string; [key: string]: unknown }
+  oauth2: OutlookOAuthConfig
+  temp_mail?: Record<string, unknown>
+  [key: string]: unknown
+}
+
 export interface OutlookRegisterSnapshot {
-  taskId: string; enabled: boolean; status: string; config: Record<string, any>; stats: OutlookRegisterStats
+  taskId: string; enabled: boolean; status: string; config: OutlookRegisterConfig; stats: OutlookRegisterStats
   failure_stats?: Record<string, number>; result_count?: number; log_count?: number; proxyGroup?: string; proxyCount?: number
 }
 
@@ -97,7 +111,7 @@ export const outlookGateway = {
   proxies: (page = 1, pageSize = 100) => request<{ items: OutlookProxy[]; total: number; page: number; pageSize: number }>(`/api/outlook/proxies?page=${page}&pageSize=${pageSize}`),
   proxyGroups: () => request<ProxyGroupSummary[]>('/api/outlook/proxy-groups'),
   registerStatus: () => request<OutlookRegisterSnapshot>('/api/outlook/register'),
-  updateRegisterConfig: (config: Record<string, any>) => request<{ config: Record<string, any> }>('/api/outlook/register', { method: 'PUT', body: JSON.stringify(config) }),
+  updateRegisterConfig: (config: OutlookRegisterConfig) => request<{ config: OutlookRegisterConfig }>('/api/outlook/register', { method: 'PUT', body: JSON.stringify(config) }),
   startRegister: () => request<OutlookRegisterSnapshot>('/api/outlook/register/start', { method: 'POST' }),
   stopRegister: () => request<OutlookRegisterSnapshot>('/api/outlook/register/stop', { method: 'POST' }),
   resetRegister: () => request<OutlookRegisterSnapshot>('/api/outlook/register/reset', { method: 'POST' }),
