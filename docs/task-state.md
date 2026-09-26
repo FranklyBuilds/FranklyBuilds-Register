@@ -127,3 +127,15 @@
 - 修复只移动/复用分页枚举，未改任务引擎、数据库结构或前端；既有 httpx/未 await 协程/OpenAPI Operation ID 警告未作为本轮功能扩大处理。
 - 运行状态：主服务 PID 16628 仍未重启，8000 的旧代码仍可能对 pageSize=1 返回 500；不将隔离 TestClient 验证冒充现有进程已加载修复。
 - 回滚：回退本轮提交并重启主服务；无数据迁移。当前代码已验证，提交现有 PR #5 核对 CI 后，唯一执行验收动作仍是加载新后端并补齐真实测试环境。
+
+
+## 2026-09-26 Outlook 浏览器依赖故障修复（已完成，真实注册待验收）
+- 本轮目标：解决实际日志中的 `browser_launch_fail / Executable doesn't exist`，不改变注册、代理或验证码逻辑，不发起真实外部注册。
+- 证据：09:01 缺 `chromium_headless_shell-1243`，10:42 重试缺 `chromium-1243`；主服务虚拟环境 Patchright 1.63.0 要求 1243，缓存只有 1179/1228/1234。系统 Python 的 1.61.2 并非主服务使用版本。
+- 已执行：使用 `register_env\Scripts\python.exe -m patchright install chromium` 补齐 1243 两种浏览器，安装期间 `PLAYWRIGHT_SKIP_BROWSER_GC=1` 保留旧缓存；未改变缓存路径、Python 依赖版本或主服务任务数据。
+- 已验证：同虚拟环境的 Chromium 153.0.8010.12 与 headless shell 均能启动、创建 Context/Page、读取本地 DOM 并正常关闭；两条可执行文件都存在。
+- 涉及文件：`app/setup.ps1`、`app/tests/backend/test_windows_setup.py`、README 与本状态文件；安装缺口修正为同 Python 模块调用和原生命令退出码检查。
+- 验收命令：两种浏览器本地空白页冒烟、`python -m pytest tests/backend/test_windows_setup.py`、后端回归、PowerShell 解析、`git diff --check`；不以浏览器启动通过代替真实注册成功。
+- 备份：`data/backups/outlook-browser-dependencies-20260926-105316/` 保留修改前文档与 setup；回滚代码使用本轮独立提交，不删除其它项目共享浏览器缓存。
+- PR #5 已于 2026-09-25T23:50:07Z 合并；本轮从等价文件树的 `origin/main` 新建 `codex/outlook-browser-dependencies`，不继续向已合并 PR 提交。
+- 已完成本轮修复；下一步唯一动作：若要验收真实注册，需在受控测试账号、可用代理和邮箱池条件下重启主服务后运行一个小任务；本轮不以本地浏览器启动冒烟代替真实注册成功。

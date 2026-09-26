@@ -170,6 +170,8 @@ Copy-Item .env.example .env
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1
 ```
 
+`setup.ps1` installs the Outlook browser through the same `register_env\Scripts\python.exe` used by the main service (`python -m patchright install chromium`). If a browser executable is missing after a package update, rerun that setup command rather than invoking a `patchright.exe` from another Python installation; the script stops immediately when dependency, browser, or npm installation fails.
+
 日常使用通过根目录统一入口启动：
 
 ```powershell
