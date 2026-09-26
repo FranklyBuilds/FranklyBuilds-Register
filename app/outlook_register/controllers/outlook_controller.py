@@ -216,6 +216,39 @@ class OutlookController:
     def _log(self, msg):
         self.log_event('TASK', 'INFO', 'general', msg)
 
+    @staticmethod
+    def _diagnostic_value(value, limit=220):
+        """Return a short, single-line, redacted value suitable for diagnostics."""
+        text = OutlookController._redact_log_text(value)
+        text = ' '.join(str(text).replace('\r', '\n').replace('\n', ' ').split())
+        if len(text) > limit:
+            return text[:limit - 3] + '...'
+        return text
+
+    def _page_diagnostic(self, page, exc=None):
+        """Collect safe page context without masking the original browser error."""
+        parts = []
+        if exc is not None:
+            parts.append(
+                f"error={type(exc).__name__}: {self._diagnostic_value(exc)}"
+            )
+
+        try:
+            url = getattr(page, 'url', '') or ''
+        except Exception:
+            url = ''
+        if url:
+            parts.append(f"url={self._diagnostic_value(url, 180)}")
+
+        try:
+            title = page.title() or ''
+        except Exception:
+            title = ''
+        if title:
+            parts.append(f"title={self._diagnostic_value(title, 120)}")
+
+        return ' '.join(parts) or 'page_context=unavailable'
+
     def _log_prefix_str(self):
         return getattr(self.thread_local, '_log_prefix', '')
 
@@ -866,14 +899,45 @@ class OutlookController:
         day = str(random.randint(1, 25))
 
         try:
-            page.goto("https://outlook.live.com/mail/0/?prompt=create_account", timeout=30000, wait_until="domcontentloaded")
+            page.goto(
+                "https://outlook.live.com/mail/0/?prompt=create_account",
+                timeout=30000,
+                wait_until="domcontentloaded",
+            )
+        except Exception as exc:
+            self.bump_failure('ip_cant_open')
+            self.log_event(
+                'REGISTER',
+                'FAIL',
+                'page_navigation',
+                f"注册页导航失败: {self._page_diagnostic(page, exc)}",
+            )
+            return False
+
+        try:
             page.get_by_text('同意并继续').wait_for(timeout=30000)
-            start_time = time.time()
+        except Exception as exc:
+            self.bump_failure('register_page_open_fail')
+            self.log_event(
+                'REGISTER',
+                'FAIL',
+                'page_entry',
+                f"注册页入口未出现: {self._page_diagnostic(page, exc)}",
+            )
+            return False
+
+        start_time = time.time()
+        try:
             page.wait_for_timeout(0.1 * self.wait_time)
             page.get_by_text('同意并继续').click(timeout=30000)
-        except Exception:
-            self.bump_failure('ip_cant_open', 'register_page_open_fail')
-            self._log("[Fail:IP] - IP质量不佳，无法打开Outlook注册页面，请换IP重试")
+        except Exception as exc:
+            self.bump_failure('register_page_open_fail')
+            self.log_event(
+                'REGISTER',
+                'FAIL',
+                'consent_click',
+                f"注册页同意按钮点击失败: {self._page_diagnostic(page, exc)}",
+            )
             return False
 
         try:
