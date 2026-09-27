@@ -8,19 +8,33 @@ if (-not (Test-Path -LiteralPath $envFile)) {
   Copy-Item -LiteralPath $envExample -Destination $envFile
 }
 $python = Join-Path $root 'register_env\Scripts\python.exe'
-if (-not (Test-Path -LiteralPath $python)) {
-  & python -m venv (Join-Path $root 'register_env')
+function Invoke-RequiredNative {
+  param(
+    [Parameter(Mandatory = $true)][string] $FilePath,
+    [string[]] $ArgumentList = @()
+  )
+
+  & $FilePath @ArgumentList
+  $exitCode = $LASTEXITCODE
+  if ($exitCode -ne 0) {
+    $displayArgs = if ($ArgumentList.Count) { ' ' + ($ArgumentList -join ' ') } else { '' }
+    throw "命令失败（退出码 $exitCode）：$FilePath$displayArgs"
+  }
 }
 
-& $python -m pip install --upgrade pip
-& $python -m pip install -r requirements.txt -r requirements-dev.txt
-$patchright = Join-Path (Split-Path $python) 'patchright.exe'
-if (Test-Path -LiteralPath $patchright) {
-  & $patchright install chromium
-} else {
-  Write-Warning 'patchright executable not found; Outlook registration browser was not installed.'
+if (-not (Test-Path -LiteralPath $python)) {
+  Invoke-RequiredNative -FilePath 'python' -ArgumentList @('-m', 'venv', (Join-Path $root 'register_env'))
 }
-& npm.cmd ci
+if (-not (Test-Path -LiteralPath $python)) {
+  throw "Python environment was not created: $python"
+}
+
+# Always install through the same interpreter that runs the main service. Calling a
+# separately-resolved launcher can target a different Python/cache revision.
+Invoke-RequiredNative -FilePath $python -ArgumentList @('-m', 'pip', 'install', '--upgrade', 'pip')
+Invoke-RequiredNative -FilePath $python -ArgumentList @('-m', 'pip', 'install', '-r', 'requirements.txt', '-r', 'requirements-dev.txt')
+Invoke-RequiredNative -FilePath $python -ArgumentList @('-m', 'patchright', 'install', 'chromium')
+Invoke-RequiredNative -FilePath 'npm.cmd' -ArgumentList @('ci')
 
 $mongoUriLine = Get-Content -LiteralPath $envFile |
   Where-Object { $_ -match '^AUTOREGISTER_MONGO_URI=' } |

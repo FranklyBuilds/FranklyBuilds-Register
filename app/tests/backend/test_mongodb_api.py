@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -894,6 +895,119 @@ def test_outlook_runtime_logs_redact_proxy_and_token_values() -> None:
     assert "SECRET_USER" not in OutlookController._redact_log_text(text)
     assert "SECRET_PASS" not in OutlookController._redact_log_text(text)
     assert "SECRET_REFRESH" not in OutlookController._redact_log_text(text)
+
+
+def test_outlook_register_page_failures_are_classified_once_and_keep_diagnostics(tmp_path: Path) -> None:
+    import sys
+
+    legacy_root = Path(__file__).resolve().parents[2] / "outlook_register"
+    sys.path.insert(0, str(legacy_root))
+    try:
+        from controllers.outlook_controller import OutlookController
+    finally:
+        sys.path.remove(str(legacy_root))
+
+    class Locator:
+        def __init__(self, *, wait_error=None, click_error=None):
+            self.wait_error = wait_error
+            self.click_error = click_error
+
+        def wait_for(self, **kwargs):
+            _ = kwargs
+            if self.wait_error is not None:
+                raise self.wait_error
+
+        def click(self, **kwargs):
+            _ = kwargs
+            if self.click_error is not None:
+                raise self.click_error
+
+    class Page:
+        url = "https://outlook.live.com/mail/0/?prompt=create_account"
+
+        def __init__(self, *, goto_error=None, wait_error=None, click_error=None):
+            self.goto_error = goto_error
+            self.wait_error = wait_error
+            self.click_error = click_error
+
+        def goto(self, *args, **kwargs):
+            _ = args, kwargs
+            if self.goto_error is not None:
+                raise self.goto_error
+
+        def get_by_text(self, text):
+            assert text == "同意并继续"
+            return Locator(wait_error=self.wait_error, click_error=self.click_error)
+
+        def wait_for_timeout(self, milliseconds):
+            _ = milliseconds
+
+        def title(self):
+            return "Outlook 注册测试页"
+
+    def make_controller(log_name: str):
+        controller = OutlookController.__new__(OutlookController)
+        controller.wait_time = 0
+        controller.email_suffix = "@outlook.com"
+        controller.failure_stats = {
+            "ip_cant_open": 0,
+            "register_page_open_fail": 0,
+        }
+        controller.failure_lock = threading.Lock()
+        controller.log_lock = threading.Lock()
+        controller.thread_local = threading.local()
+        controller.log_path = str(tmp_path / log_name)
+        return controller
+
+    navigation_controller = make_controller("navigation.log")
+    navigation_result = navigation_controller.outlook_register(
+        Page(
+            goto_error=RuntimeError(
+                "proxy=http://SECRET_USER:SECRET_PASS@proxy.example.test:8080 "
+                "password=SECRET_PROXY"
+            )
+        ),
+        "account@outlook.com",
+        "ACCOUNT_PASSWORD",
+    )
+    navigation_log = (tmp_path / "navigation.log").read_text(encoding="utf-8")
+    assert navigation_result is False
+    assert navigation_controller.failure_stats == {
+        "ip_cant_open": 1,
+        "register_page_open_fail": 0,
+    }
+    assert "page_navigation" in navigation_log
+    assert "RuntimeError" in navigation_log
+    assert "Outlook 注册测试页" in navigation_log
+    assert "SECRET_USER" not in navigation_log
+    assert "SECRET_PASS" not in navigation_log
+    assert "SECRET_PROXY" not in navigation_log
+
+    entry_controller = make_controller("entry.log")
+    entry_result = entry_controller.outlook_register(
+        Page(wait_error=TimeoutError("entry selector timeout")),
+        "account@outlook.com",
+        "ACCOUNT_PASSWORD",
+    )
+    assert entry_result is False
+    assert entry_controller.failure_stats == {
+        "ip_cant_open": 0,
+        "register_page_open_fail": 1,
+    }
+    assert "page_entry" in (tmp_path / "entry.log").read_text(encoding="utf-8")
+
+    consent_controller = make_controller("consent.log")
+    consent_result = consent_controller.outlook_register(
+        Page(click_error=TimeoutError("consent button timeout")),
+        "account@outlook.com",
+        "ACCOUNT_PASSWORD",
+    )
+    assert consent_result is False
+    assert consent_controller.failure_stats == {
+        "ip_cant_open": 0,
+        "register_page_open_fail": 1,
+    }
+    assert "consent_click" in (tmp_path / "consent.log").read_text(encoding="utf-8")
 
 
 def test_outlook_registration_both_mode_aggregates_registration_and_authorized_stats() -> None:
